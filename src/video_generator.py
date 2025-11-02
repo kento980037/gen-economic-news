@@ -94,9 +94,10 @@ class VideoGenerator:
                     title_clip = self._create_title_overlay(title)
                     clips.append(title_clip)
 
-                if keywords and self.text_overlay_config.get("show_keywords", True):
-                    keyword_clips = self._create_keyword_overlays(keywords, duration)
-                    clips.extend(keyword_clips)
+                # キーワードオーバーレイは無効化
+                # if keywords and self.text_overlay_config.get("show_keywords", True):
+                #     keyword_clips = self._create_keyword_overlays(keywords, duration)
+                #     clips.extend(keyword_clips)
 
             # クリップを合成
             video = CompositeVideoClip(clips, size=self.resolution)
@@ -487,22 +488,22 @@ class VideoGenerator:
         temp_img = Image.new("RGBA", (1, 1))
         draw = ImageDraw.Draw(temp_img)
 
-        # 複数行対応
+        # 複数行対応（日本語対応版）
         lines = []
         if max_width:
-            words = text.split()
+            # 日本語の場合は文字単位で折り返す
             current_line = ""
-            for word in words:
-                test_line = current_line + word + " "
+            for char in text:
+                test_line = current_line + char
                 bbox = draw.textbbox((0, 0), test_line, font=font)
                 if bbox[2] - bbox[0] <= max_width:
                     current_line = test_line
                 else:
                     if current_line:
-                        lines.append(current_line.strip())
-                    current_line = word + " "
+                        lines.append(current_line)
+                    current_line = char
             if current_line:
-                lines.append(current_line.strip())
+                lines.append(current_line)
         else:
             lines = [text]
 
@@ -510,6 +511,7 @@ class VideoGenerator:
         max_line_width = 0
         total_height = 0
         line_heights = []
+        line_spacing = font_size // 4  # 行間
 
         for line in lines:
             bbox = draw.textbbox((0, 0), line, font=font)
@@ -518,6 +520,10 @@ class VideoGenerator:
             max_line_width = max(max_line_width, line_width)
             line_heights.append(line_height)
             total_height += line_height
+
+        # 行間を追加
+        if len(lines) > 1:
+            total_height += line_spacing * (len(lines) - 1)
 
         # 余白を追加
         padding = 20
@@ -544,7 +550,7 @@ class VideoGenerator:
             # テキスト本体
             draw.text((x, y_offset), line, font=font, fill=text_color)
 
-            y_offset += line_heights[i]
+            y_offset += line_heights[i] + (line_spacing if i < len(lines) - 1 else 0)
 
         # numpy配列に変換
         return np.array(img)

@@ -47,6 +47,12 @@ class VideoGenerationPipeline:
         Args:
             config_path: 設定ファイルのパス
         """
+        # プロジェクトルートを基準にパスを解決
+        if not os.path.isabs(config_path):
+            # 相対パスの場合、srcディレクトリの親（プロジェクトルート）を基準にする
+            project_root = Path(__file__).parent.parent
+            config_path = str(project_root / config_path)
+
         # 設定読み込み
         self.config = load_config(config_path)
 

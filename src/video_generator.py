@@ -131,42 +131,66 @@ class VideoGenerator:
 
     def _create_background(self, duration: float):
         """背景クリップを作成"""
-        bg_type = self.background_config.get("type", "gradient")
         width, height = self.resolution
 
-        if bg_type == "solid":
-            # 単色背景
-            color = self._hex_to_rgb(self.background_config.get("color1", "#1a1a2e"))
-            background = ColorClip(size=self.resolution, color=color, duration=duration)
+        # main_img.pngを使用
+        project_root = Path(__file__).parent.parent
+        main_img_path = project_root / "main_img.png"
 
-        elif bg_type == "gradient":
-            # グラデーション背景
-            color1 = self._hex_to_rgb(self.background_config.get("color1", "#1a1a2e"))
-            color2 = self._hex_to_rgb(self.background_config.get("color2", "#16213e"))
-            direction = self.background_config.get("direction", "vertical")
+        if main_img_path.exists():
+            # main_img.pngを読み込んで下3分の1を透明にする
+            logger.info(f"Using main_img.png as background: {main_img_path}")
 
-            gradient_img = self._create_gradient_image(
-                self.resolution, color1, color2, direction
-            )
-            background = ImageClip(gradient_img, duration=duration)
+            # 画像を読み込んでリサイズ
+            bg_img = Image.open(main_img_path).convert("RGBA")
+            bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
 
-        elif bg_type == "image":
-            # 画像背景
-            image_path = self.background_config.get("image_path")
-            if image_path and os.path.exists(image_path):
-                background = ImageClip(image_path, duration=duration)
-                background = background.resize(self.resolution)
-            else:
-                logger.warning(f"Background image not found: {image_path}")
-                # フォールバックとして単色背景
-                color = self._hex_to_rgb(self.background_config.get("color1", "#1a1a2e"))
-                background = ColorClip(
-                    size=self.resolution, color=color, duration=duration
-                )
+            # 下3分の1に透明グラデーションを追加
+            overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            draw_overlay = ImageDraw.Draw(overlay)
+
+            # グラデーション開始位置（下から3分の1の位置）
+            gradient_start = int(height * 2 / 3)
+
+            # グラデーションを描画（上から下に向かって透明から黒へ）
+            for y in range(gradient_start, height):
+                # 透明度を徐々に上げる（0-230）
+                alpha = int(230 * (y - gradient_start) / (height - gradient_start))
+                draw_overlay.rectangle([(0, y), (width, y + 1)], fill=(0, 0, 0, alpha))
+
+            # 背景画像とオーバーレイを合成
+            bg_img = Image.alpha_composite(bg_img, overlay)
+
+            # numpy配列に変換
+            bg_array = np.array(bg_img)
+
+            # ImageClipを作成
+            background = ImageClip(bg_array, duration=duration)
 
         else:
-            # デフォルトは黒背景
-            background = ColorClip(size=self.resolution, color=(0, 0, 0), duration=duration)
+            # main_img.pngが見つからない場合はフォールバック
+            logger.warning(f"main_img.png not found at {main_img_path}, using fallback")
+            bg_type = self.background_config.get("type", "gradient")
+
+            if bg_type == "solid":
+                # 単色背景
+                color = self._hex_to_rgb(self.background_config.get("color1", "#1a1a2e"))
+                background = ColorClip(size=self.resolution, color=color, duration=duration)
+
+            elif bg_type == "gradient":
+                # グラデーション背景
+                color1 = self._hex_to_rgb(self.background_config.get("color1", "#1a1a2e"))
+                color2 = self._hex_to_rgb(self.background_config.get("color2", "#16213e"))
+                direction = self.background_config.get("direction", "vertical")
+
+                gradient_img = self._create_gradient_image(
+                    self.resolution, color1, color2, direction
+                )
+                background = ImageClip(gradient_img, duration=duration)
+
+            else:
+                # デフォルトは黒背景
+                background = ColorClip(size=self.resolution, color=(0, 0, 0), duration=duration)
 
         return background.set_fps(self.fps)
 
@@ -387,69 +411,76 @@ class VideoGenerator:
             width = self.thumbnail_config.get("width", 1280)
             height = self.thumbnail_config.get("height", 720)
 
-            # 画像を作成
-            img = Image.new("RGB", (width, height))
+            # main_img.pngを読み込み
+            project_root = Path(__file__).parent.parent
+            main_img_path = project_root / "main_img.png"
+
+            if not main_img_path.exists():
+                logger.error(f"main_img.png not found at {main_img_path}")
+                raise FileNotFoundError(f"main_img.png not found at {main_img_path}")
+
+            # 背景画像を読み込んでリサイズ
+            bg_img = Image.open(main_img_path).convert("RGBA")
+            bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
+
+            # 下3分の1に透明グラデーションを追加
+            overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            draw_overlay = ImageDraw.Draw(overlay)
+
+            # グラデーション開始位置（下から3分の1の位置）
+            gradient_start = int(height * 2 / 3)
+
+            # グラデーションを描画（上から下に向かって透明から黒へ）
+            for y in range(gradient_start, height):
+                # 透明度を徐々に上げる（0-230）
+                alpha = int(230 * (y - gradient_start) / (height - gradient_start))
+                draw_overlay.rectangle([(0, y), (width, y + 1)], fill=(0, 0, 0, alpha))
+
+            # 背景画像とオーバーレイを合成
+            bg_img = Image.alpha_composite(bg_img, overlay)
+
+            # RGBに変換（JPEGで保存するため）
+            img = bg_img.convert("RGB")
             draw = ImageDraw.Draw(img)
 
-            # 背景色
-            bg_color = self._hex_to_rgb(
-                self.thumbnail_config.get("background_color", "#0f3460")
-            )
-            draw.rectangle([(0, 0), (width, height)], fill=bg_color)
-
             # タイトルを描画
-            font_size = self.thumbnail_config.get("font_size", 72)
+            font_size = self.thumbnail_config.get("font_size", 60)
             text_color = self._hex_to_rgb(
                 self.thumbnail_config.get("text_color", "#ffffff")
             )
 
-            # タイトルを折り返し
-            max_title_length = self.thumbnail_config.get("max_title_length", 40)
-            if len(title) > max_title_length:
-                title = title[:max_title_length] + "..."
-
             # フォントを読み込み
             font = self._load_japanese_font(font_size)
 
-            # テキストの位置を計算
-            bbox = draw.textbbox((0, 0), title, font=font)
-            text_width = bbox[2] - bbox[0]
-            text_height = bbox[3] - bbox[1]
-            text_x = (width - text_width) // 2
-            text_y = (height - text_height) // 2
+            # タイトルを複数行に折り返し
+            max_width = width - 100
+            lines = self._wrap_text_japanese(title, font, max_width, draw)
 
-            # 影を追加
-            shadow_offset = 4
-            draw.text(
-                (text_x + shadow_offset, text_y + shadow_offset),
-                title,
-                font=font,
-                fill=(0, 0, 0, 128),
-            )
+            # テキスト全体の高さを計算
+            line_height = font_size + 10
+            total_text_height = len(lines) * line_height
 
-            # テキストを描画
-            draw.text((text_x, text_y), title, font=font, fill=text_color)
+            # 下3分の1の中央にテキストを配置
+            text_start_y = gradient_start + (height - gradient_start - total_text_height) // 2
 
-            # "経済ニュース" バッジを追加
-            badge_text = "経済ニュース"
-            badge_font_size = font_size // 3
-            badge_font = self._load_japanese_font(badge_font_size)
+            # 各行を描画
+            for i, line in enumerate(lines):
+                bbox = draw.textbbox((0, 0), line, font=font)
+                line_width = bbox[2] - bbox[0]
+                text_x = (width - line_width) // 2
+                text_y = text_start_y + i * line_height
 
-            bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
-            badge_width = bbox[2] - bbox[0]
-            badge_height = bbox[3] - bbox[1]
-            badge_x = 50
-            badge_y = 50
+                # 影を追加
+                shadow_offset = 3
+                draw.text(
+                    (text_x + shadow_offset, text_y + shadow_offset),
+                    line,
+                    font=font,
+                    fill=(0, 0, 0),
+                )
 
-            # バッジ背景
-            draw.rectangle(
-                [
-                    (badge_x - 10, badge_y - 10),
-                    (badge_x + badge_width + 10, badge_y + badge_height + 10),
-                ],
-                fill=(255, 69, 0),
-            )
-            draw.text((badge_x, badge_y), badge_text, font=badge_font, fill=text_color)
+                # テキストを描画
+                draw.text((text_x, text_y), line, font=font, fill=text_color)
 
             # 画像を保存
             img.save(output_path, quality=95)
@@ -554,6 +585,39 @@ class VideoGenerator:
 
         # numpy配列に変換
         return np.array(img)
+
+    def _wrap_text_japanese(
+        self, text: str, font, max_width: int, draw
+    ) -> List[str]:
+        """
+        日本語テキストを指定幅で折り返し
+
+        Args:
+            text: 折り返すテキスト
+            font: フォントオブジェクト
+            max_width: 最大幅
+            draw: ImageDrawオブジェクト
+
+        Returns:
+            折り返されたテキストの行リスト
+        """
+        lines = []
+        current_line = ""
+
+        for char in text:
+            test_line = current_line + char
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            if bbox[2] - bbox[0] <= max_width:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = char
+
+        if current_line:
+            lines.append(current_line)
+
+        return lines
 
     def _load_japanese_font(self, font_size: int):
         """

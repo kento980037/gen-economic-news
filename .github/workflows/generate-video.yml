@@ -66,9 +66,9 @@ jobs:
         with:
           name: generated-videos-${{ github.run_number }}
           path: |
-            output/videos/*.mp4
-            output/thumbnails/*.jpg
-            output/scripts/*.json
+            src/output/videos/*.mp4
+            src/output/thumbnails/*.jpg
+            src/output/scripts/*.json
           retention-days: 30
 
       - name: Notify on failure

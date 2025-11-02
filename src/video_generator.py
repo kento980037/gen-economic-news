@@ -198,22 +198,35 @@ class VideoGenerator:
 
         return image
 
-    def _create_title_overlay(self, title: str) -> TextClip:
-        """タイトルオーバーレイを作成"""
+    def _create_title_overlay(self, title: str) -> ImageClip:
+        """タイトルオーバーレイを作成（Pillowで画像生成）"""
         font_size = self.text_overlay_config.get("font_size", 48)
         color = self.text_overlay_config.get("color", "white")
         title_duration = self.text_overlay_config.get("title_duration", 5)
 
-        # テキストクリップを作成
-        txt_clip = TextClip(
+        # 色を変換
+        if isinstance(color, str):
+            if color.lower() == "white":
+                text_color = (255, 255, 255, 255)
+            elif color.lower() == "black":
+                text_color = (0, 0, 0, 255)
+            else:
+                # 16進数カラーコード
+                rgb = self._hex_to_rgb(color)
+                text_color = (*rgb, 255)
+        else:
+            text_color = (*color, 255)
+
+        # 画像を作成
+        img = self._create_text_image(
             title,
-            fontsize=font_size,
-            color=color,
-            font=self.text_overlay_config.get("font", "Arial-Bold"),
-            method="caption",
-            size=(self.resolution[0] - 200, None),  # 左右に余白
-            align="center",
+            font_size,
+            text_color,
+            max_width=self.resolution[0] - 200,
         )
+
+        # ImageClipを作成
+        txt_clip = ImageClip(img, duration=title_duration)
 
         # 位置を設定
         position = self.text_overlay_config.get("position", "center")
@@ -224,8 +237,7 @@ class VideoGenerator:
         else:  # center
             txt_clip = txt_clip.set_position("center")
 
-        # 表示時間とエフェクトを設定
-        txt_clip = txt_clip.set_duration(title_duration)
+        # エフェクトを設定
         txt_clip = fadein(txt_clip, 0.5)
         txt_clip = fadeout(txt_clip, 0.5)
 
@@ -233,11 +245,23 @@ class VideoGenerator:
 
     def _create_keyword_overlays(
         self, keywords: List[str], duration: float
-    ) -> List[TextClip]:
-        """キーワードオーバーレイを作成"""
+    ) -> List[ImageClip]:
+        """キーワードオーバーレイを作成（Pillowで画像生成）"""
         clips = []
         font_size = self.text_overlay_config.get("font_size", 48) - 12  # 少し小さく
         color = self.text_overlay_config.get("color", "white")
+
+        # 色を変換
+        if isinstance(color, str):
+            if color.lower() == "white":
+                text_color = (255, 255, 255, 255)
+            elif color.lower() == "black":
+                text_color = (0, 0, 0, 255)
+            else:
+                rgb = self._hex_to_rgb(color)
+                text_color = (*rgb, 255)
+        else:
+            text_color = (*color, 255)
 
         # キーワードを順次表示（最大5個）
         display_keywords = keywords[:5]
@@ -248,16 +272,20 @@ class VideoGenerator:
             if start_time >= duration:
                 break
 
-            txt_clip = TextClip(
+            # キーワード画像を生成
+            keyword_img = self._create_text_image(
                 f"#{keyword}",
-                fontsize=font_size,
-                color=color,
-                font=self.text_overlay_config.get("font", "Arial-Bold"),
+                font_size,
+                text_color,
+                add_background=True,
             )
+
+            # ImageClipを作成
+            txt_clip = ImageClip(keyword_img)
 
             # 右下に配置
             txt_clip = txt_clip.set_position(
-                (self.resolution[0] - txt_clip.w - 50, self.resolution[1] - 100)
+                (self.resolution[0] - keyword_img.shape[1] - 50, self.resolution[1] - 100)
             )
 
             # 表示時間を設定
@@ -365,6 +393,95 @@ class VideoGenerator:
         except Exception as e:
             logger.error(f"Error creating thumbnail: {e}")
             raise
+
+    def _create_text_image(
+        self,
+        text: str,
+        font_size: int,
+        text_color: Tuple[int, int, int, int],
+        max_width: Optional[int] = None,
+        add_background: bool = False,
+    ) -> np.ndarray:
+        """
+        Pillowを使ってテキスト画像を生成
+
+        Args:
+            text: 表示するテキスト
+            font_size: フォントサイズ
+            text_color: テキスト色 (R, G, B, A)
+            max_width: 最大幅（折り返し用）
+            add_background: 背景を追加するか
+
+        Returns:
+            numpy配列の画像
+        """
+        font = self._load_japanese_font(font_size)
+
+        # テキストサイズを計算
+        temp_img = Image.new("RGBA", (1, 1))
+        draw = ImageDraw.Draw(temp_img)
+
+        # 複数行対応
+        lines = []
+        if max_width:
+            words = text.split()
+            current_line = ""
+            for word in words:
+                test_line = current_line + word + " "
+                bbox = draw.textbbox((0, 0), test_line, font=font)
+                if bbox[2] - bbox[0] <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line.strip())
+                    current_line = word + " "
+            if current_line:
+                lines.append(current_line.strip())
+        else:
+            lines = [text]
+
+        # 全体のサイズを計算
+        max_line_width = 0
+        total_height = 0
+        line_heights = []
+
+        for line in lines:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            line_width = bbox[2] - bbox[0]
+            line_height = bbox[3] - bbox[1]
+            max_line_width = max(max_line_width, line_width)
+            line_heights.append(line_height)
+            total_height += line_height
+
+        # 余白を追加
+        padding = 20
+        img_width = max_line_width + padding * 2
+        img_height = total_height + padding * 2
+
+        # 背景付きの場合
+        if add_background:
+            img = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 180))
+        else:
+            img = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 0))
+
+        draw = ImageDraw.Draw(img)
+
+        # テキストを描画
+        y_offset = padding
+        for i, line in enumerate(lines):
+            bbox = draw.textbbox((0, 0), line, font=font)
+            line_width = bbox[2] - bbox[0]
+            x = (img_width - line_width) // 2
+
+            # 影を追加
+            draw.text((x + 2, y_offset + 2), line, font=font, fill=(0, 0, 0, 200))
+            # テキスト本体
+            draw.text((x, y_offset), line, font=font, fill=text_color)
+
+            y_offset += line_heights[i]
+
+        # numpy配列に変換
+        return np.array(img)
 
     def _load_japanese_font(self, font_size: int):
         """

@@ -116,6 +116,7 @@ class MetadataGenerator:
 タイトル: {news_article.get('title', '')}
 要約: {news_article.get('summary', '')}
 ソース: {news_article.get('source', '')}
+URL: {news_article.get('url', '')}
 
 【要件】
 1. タイトル:
@@ -131,6 +132,7 @@ class MetadataGenerator:
    - {"ハッシュタグを含める" if include_hashtags else ""}
    - {"チャプター情報を含める（タイムスタンプ付き）" if include_chapters else ""}
    - 視聴者にとっての価値を明確に
+   - **必須**: 説明文の最後に「参考記事」セクションを設け、元記事のタイトルとURLを記載すること
 
 3. タグ:
    - 関連性の高いタグを10-15個
@@ -144,6 +146,10 @@ class MetadataGenerator:
 
 ## 説明文
 [YouTube動画説明文]
+
+📰 参考記事
+{news_article.get('title', '')}
+{news_article.get('url', '')}
 
 ## タグ
 [タグ1, タグ2, タグ3, ...]

@@ -39,6 +39,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
 
+          # ImageMagickのセキュリティポリシーを緩和（MoviePyのTextClip用）
+          sudo sed -i 's/rights="none" pattern="@\*"/rights="read|write" pattern="@*"/' /etc/ImageMagick-6/policy.xml
+          sudo sed -i 's/rights="none" pattern="LABEL"/rights="read|write" pattern="LABEL"/' /etc/ImageMagick-6/policy.xml
+
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip setuptools wheel

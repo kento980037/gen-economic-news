@@ -197,6 +197,45 @@ class VoiceGenerator:
             # 複数セグメントの場合は番号付きファイルを生成
             return self.generate_voice_segments(segments, output_dir, filename)
 
+    def transcribe_audio_with_timestamps(self, audio_file: str) -> list[dict]:
+        """
+        音声ファイルをWhisperで文字起こしし、タイムスタンプ付きのセグメントを返す
+
+        Args:
+            audio_file: 音声ファイルパス
+
+        Returns:
+            タイムスタンプ付きセグメントのリスト
+            [{"start": 0.0, "end": 2.5, "text": "こんにちは"}, ...]
+        """
+        logger.info(f"Transcribing audio file: {audio_file}")
+
+        try:
+            with open(audio_file, "rb") as f:
+                transcript = self.client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=f,
+                    response_format="verbose_json",
+                    timestamp_granularities=["segment"]
+                )
+
+            # セグメントを抽出
+            segments = []
+            if hasattr(transcript, 'segments') and transcript.segments:
+                for seg in transcript.segments:
+                    segments.append({
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": seg.text.strip()
+                    })
+
+            logger.info(f"Transcribed {len(segments)} segments")
+            return segments
+
+        except Exception as e:
+            logger.error(f"Error transcribing audio: {e}")
+            raise
+
     def get_available_voices(self) -> list[str]:
         """
         利用可能な声のリストを取得

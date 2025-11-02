@@ -46,6 +46,7 @@ class VideoGenerator:
         output_path: str,
         title: Optional[str] = None,
         keywords: Optional[List[str]] = None,
+        subtitles: Optional[List[Dict]] = None,
     ) -> str:
         """
         音声ファイルから動画を生成
@@ -82,6 +83,11 @@ class VideoGenerator:
 
             # テキストオーバーレイを作成
             clips = [background]
+
+            # 字幕を追加（最優先）
+            if subtitles:
+                subtitle_clips = self._create_subtitle_overlays(subtitles, duration)
+                clips.extend(subtitle_clips)
 
             if self.text_overlay_config.get("enabled", True):
                 if title and self.text_overlay_config.get("show_title", True):
@@ -296,6 +302,66 @@ class VideoGenerator:
 
             clips.append(txt_clip)
 
+        return clips
+
+    def _create_subtitle_overlays(
+        self, subtitles: List[Dict], duration: float
+    ) -> List[ImageClip]:
+        """
+        字幕オーバーレイを作成
+
+        Args:
+            subtitles: タイムスタンプ付き字幕リスト
+                      [{"start": 0.0, "end": 2.5, "text": "こんにちは"}, ...]
+            duration: 動画の長さ
+
+        Returns:
+            字幕クリップのリスト
+        """
+        clips = []
+        font_size = 40  # 字幕用のフォントサイズ
+        text_color = (255, 255, 255, 255)  # 白
+
+        logger.info(f"Creating {len(subtitles)} subtitle clips")
+
+        for subtitle in subtitles:
+            start_time = subtitle.get("start", 0)
+            end_time = subtitle.get("end", 0)
+            text = subtitle.get("text", "")
+
+            if not text or end_time <= start_time:
+                continue
+
+            # 字幕が動画の長さを超える場合は調整
+            if start_time >= duration:
+                continue
+            if end_time > duration:
+                end_time = duration
+
+            # 字幕画像を生成
+            subtitle_img = self._create_text_image(
+                text,
+                font_size,
+                text_color,
+                max_width=self.resolution[0] - 100,
+                add_background=True,
+            )
+
+            # ImageClipを作成
+            subtitle_clip = ImageClip(subtitle_img)
+
+            # 画面下部中央に配置
+            subtitle_clip = subtitle_clip.set_position(
+                ("center", self.resolution[1] - subtitle_img.shape[0] - 50)
+            )
+
+            # 表示時間を設定
+            subtitle_clip = subtitle_clip.set_start(start_time)
+            subtitle_clip = subtitle_clip.set_duration(end_time - start_time)
+
+            clips.append(subtitle_clip)
+
+        logger.info(f"Created {len(clips)} subtitle clips")
         return clips
 
     def create_thumbnail(self, title: str, output_path: str) -> str:

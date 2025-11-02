@@ -183,11 +183,26 @@ class VideoGenerationPipeline:
         """動画を生成"""
         paths = self.context.get_output_paths()
 
+        # Whisperで音声から字幕を生成
+        logger.info("Generating subtitles from audio...")
+        subtitles = []
+        try:
+            # 最初の音声ファイルから字幕を取得
+            if audio_files:
+                subtitles = self.voice_generator.transcribe_audio_with_timestamps(
+                    audio_files[0]
+                )
+                logger.info(f"Generated {len(subtitles)} subtitle segments")
+        except Exception as e:
+            logger.warning(f"Could not generate subtitles: {e}")
+            # 字幕生成に失敗しても動画生成は続行
+
         return self.video_generator.create_video(
             audio_files,
             paths["video"],
             title=script_data["title"],
             keywords=script_data["keywords"],
+            subtitles=subtitles,
         )
 
     def _generate_metadata(self, script_data, news_article):

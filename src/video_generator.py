@@ -89,15 +89,16 @@ class VideoGenerator:
                 subtitle_clips = self._create_subtitle_overlays(subtitles, duration)
                 clips.extend(subtitle_clips)
 
-            if self.text_overlay_config.get("enabled", True):
-                if title and self.text_overlay_config.get("show_title", True):
-                    title_clip = self._create_title_overlay(title)
-                    clips.append(title_clip)
-
-                # キーワードオーバーレイは無効化
-                # if keywords and self.text_overlay_config.get("show_keywords", True):
-                #     keyword_clips = self._create_keyword_overlays(keywords, duration)
-                #     clips.extend(keyword_clips)
+            # タイトルオーバーレイとキーワードオーバーレイは無効化
+            # if self.text_overlay_config.get("enabled", True):
+            #     if title and self.text_overlay_config.get("show_title", True):
+            #         title_clip = self._create_title_overlay(title)
+            #         clips.append(title_clip)
+            #
+            #     # キーワードオーバーレイは無効化
+            #     # if keywords and self.text_overlay_config.get("show_keywords", True):
+            #     #     keyword_clips = self._create_keyword_overlays(keywords, duration)
+            #     #     clips.extend(keyword_clips)
 
             # クリップを合成
             video = CompositeVideoClip(clips, size=self.resolution)

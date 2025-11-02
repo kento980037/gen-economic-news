@@ -1,0 +1,91 @@
+# Render設定ファイル
+# 経済ニュース動画自動生成システムをRenderでCron Jobとして実行
+
+services:
+  # Cron Job設定
+  - type: cron
+    name: gen-economic-news
+    env: python
+    # 実行スケジュール（毎日午前9時に実行）
+    # Renderはcron式をサポート: 分 時 日 月 曜日
+    # 例:
+    # "0 9 * * *"  - 毎日午前9時
+    # "0 */6 * * *" - 6時間ごと
+    # "0 9,18 * * *" - 毎日午前9時と午後6時
+    schedule: "0 9 * * *"
+
+    # リージョン（東京リージョンを使用）
+    region: singapore  # 東京リージョンがない場合はシンガポールを使用
+
+    # ビルド設定
+    buildCommand: |
+      # システムパッケージのインストール
+      apt-get update && apt-get install -y ffmpeg
+
+      # Pythonパッケージのインストール
+      pip install --upgrade pip
+      pip install -r requirements.txt
+
+    # 実行コマンド
+    startCommand: cd src && python main.py
+
+    # 環境変数
+    envVars:
+      # Pythonバージョン
+      - key: PYTHON_VERSION
+        value: 3.11
+
+      # ログレベル
+      - key: LOG_LEVEL
+        value: INFO
+
+      # 出力ディレクトリ
+      - key: OUTPUT_DIR
+        value: /opt/render/project/src/output
+
+      # APIキー（Renderのダッシュボードで設定）
+      - key: ANTHROPIC_API_KEY
+        sync: false  # 手動で設定
+
+      - key: OPENAI_API_KEY
+        sync: false  # 手動で設定
+
+      - key: NEWS_API_KEY
+        sync: false  # オプション
+
+      - key: SLACK_WEBHOOK_URL
+        sync: false  # オプション
+
+    # 永続ストレージ設定（生成した動画を保存）
+    # 注: Renderの無料プランでは永続ストレージが利用できません
+    # 有料プランまたは外部ストレージ（S3, Google Cloud Storage等）の使用を推奨
+    # disk:
+    #   name: video-storage
+    #   mountPath: /opt/render/project/src/output
+    #   sizeGB: 10
+
+---
+# 代替案1: Web Serviceとして実行し、手動トリガーまたはWebhookで起動
+# services:
+#   - type: web
+#     name: gen-economic-news-web
+#     env: python
+#     region: singapore
+#     plan: starter
+#     buildCommand: |
+#       apt-get update && apt-get install -y ffmpeg
+#       pip install --upgrade pip
+#       pip install -r requirements.txt flask
+#     startCommand: python api_server.py  # Flaskサーバーを実装する必要あり
+#     envVars:
+#       - key: PYTHON_VERSION
+#         value: 3.11
+#       - key: ANTHROPIC_API_KEY
+#         sync: false
+#       - key: OPENAI_API_KEY
+#         sync: false
+
+---
+# 代替案2: GitHub Actionsとの組み合わせ
+# Renderの代わりにGitHub Actionsでcron実行し、結果をRenderにデプロイ
+# .github/workflows/generate-video.yml を作成してください

@@ -1,0 +1,84 @@
+# GitHub Actions設定ファイル（代替案）
+# Renderの代わりにGitHub Actionsでcron実行
+
+name: Generate Economic News Video
+
+on:
+  # スケジュール実行（毎日午前9時 JST = 午前0時 UTC）
+  schedule:
+    - cron: '0 0 * * *'  # 毎日午前0時 UTC
+
+  # 手動実行を許可
+  workflow_dispatch:
+
+  # プッシュ時にテスト実行
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - '.github/workflows/generate-video.yml'
+
+jobs:
+  generate-video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create .env file
+        run: |
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
+          echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+          echo "NEWS_API_KEY=${{ secrets.NEWS_API_KEY }}" >> .env
+          echo "SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}" >> .env
+          echo "LOG_LEVEL=INFO" >> .env
+
+      - name: Run video generation
+        run: |
+          cd src
+          python main.py
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-videos-${{ github.run_number }}
+          path: |
+            output/videos/*.mp4
+            output/thumbnails/*.jpg
+            output/scripts/*.json
+          retention-days: 30
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+              -H 'Content-Type: application/json' \
+              -d '{"text":"動画生成ジョブが失敗しました: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}'
+          fi
+
+# GitHub Secretsに以下を設定してください:
+# - ANTHROPIC_API_KEY
+# - OPENAI_API_KEY
+# - NEWS_API_KEY (オプション)
+# - SLACK_WEBHOOK_URL (オプション)

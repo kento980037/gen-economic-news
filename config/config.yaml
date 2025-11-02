@@ -1,0 +1,198 @@
+# 経済ニュース動画生成システム設定ファイル
+
+# アプリケーション基本設定
+app:
+  name: "経済ニュース解説チャンネル"
+  language: "ja"
+  timezone: "Asia/Tokyo"
+
+# ニュース取得設定
+news:
+  # 取得するニュースのカテゴリ
+  categories:
+    - "経済"
+    - "ビジネス"
+    - "金融"
+    - "株式市場"
+    - "為替"
+
+  # ニュースソース（優先順位順）
+  sources:
+    - "rss"  # RSSフィード
+    - "newsapi"  # NewsAPI
+
+  # RSS Feed URLs
+  rss_feeds:
+    - "https://news.yahoo.co.jp/rss/topics/business.xml"
+    - "https://www3.nhk.or.jp/rss/news/cat6.xml"
+
+  # 取得記事数
+  max_articles: 5
+
+  # ニュースの新しさ（時間単位）
+  max_age_hours: 24
+
+# 台本生成設定
+script:
+  # Claude モデル
+  claude_model: "claude-3-5-sonnet-20241022"
+
+  # 台本の長さ（文字数）
+  min_length: 800
+  max_length: 2000
+
+  # スタイル設定
+  tone: "professional"  # professional, casual, friendly
+  style: "narration"  # narration, dialogue
+
+  # プロンプトテンプレート
+  system_prompt: |
+    あなたは経済ニュースを分かりやすく解説するプロのナレーターです。
+    視聴者は経済に興味はあるものの、専門知識は限定的な一般層を想定しています。
+    以下の点に注意して台本を作成してください：
+    - 専門用語は必要最小限にし、使う場合は簡単に説明する
+    - 具体例や数字を交えて分かりやすく説明する
+    - 視聴者の関心を引くような導入から始める
+    - 結論や今後の展望で締めくくる
+    - ナレーション形式で自然な話し言葉を使う
+
+# 音声生成設定
+voice:
+  # OpenAI TTS設定
+  model: "tts-1-hd"  # tts-1 or tts-1-hd
+  voice: "alloy"  # alloy, echo, fable, onyx, nova, shimmer
+  speed: 1.0  # 0.25 to 4.0
+
+  # 音声ファイル形式
+  format: "mp3"  # mp3, opus, aac, flac
+
+  # 音量調整
+  volume: 1.0
+
+# 動画生成設定
+video:
+  # 動画解像度
+  resolution:
+    width: 1920
+    height: 1080
+
+  # フレームレート
+  fps: 30
+
+  # 背景設定
+  background:
+    type: "gradient"  # solid, gradient, image
+    color1: "#1a1a2e"  # メインカラー（ダークブルー）
+    color2: "#16213e"  # グラデーション用カラー
+    direction: "vertical"  # horizontal, vertical, diagonal
+
+  # テキストオーバーレイ設定
+  text_overlay:
+    enabled: true
+    font: "Arial-Bold"
+    font_size: 48
+    color: "#ffffff"
+    position: "center"  # top, center, bottom
+
+    # テキスト表示タイミング
+    show_title: true
+    title_duration: 5  # 秒
+
+    # キーワード表示
+    show_keywords: true
+
+  # サムネイル設定
+  thumbnail:
+    width: 1280
+    height: 720
+    font_size: 72
+    background_color: "#0f3460"
+    text_color: "#ffffff"
+
+    # タイトルの最大文字数
+    max_title_length: 40
+
+# メタデータ生成設定
+metadata:
+  # Claude モデル
+  claude_model: "claude-3-5-sonnet-20241022"
+
+  # タイトル設定
+  title:
+    max_length: 100
+    include_date: true
+    style: "clickbait_moderate"  # formal, clickbait_moderate, clickbait_strong
+
+  # 説明文設定
+  description:
+    max_length: 5000
+    include_hashtags: true
+    include_chapters: true
+
+  # タグ設定
+  tags:
+    max_count: 15
+    default_tags:
+      - "経済ニュース"
+      - "ビジネス"
+      - "投資"
+      - "マーケット"
+      - "金融"
+
+# 出力設定
+output:
+  # 出力ディレクトリ
+  base_dir: "./output"
+
+  # サブディレクトリ構成
+  subdirs:
+    videos: "videos"
+    audio: "audio"
+    thumbnails: "thumbnails"
+    scripts: "scripts"
+    logs: "logs"
+
+  # ファイル名形式（日付を含む）
+  filename_format: "economic_news_{date}_{time}"
+
+  # 一時ファイルの自動削除
+  cleanup_temp_files: true
+
+  # 保存期間（日数）- 古いファイルを自動削除
+  retention_days: 30
+
+# 通知設定
+notification:
+  # Slack通知
+  slack:
+    enabled: false
+    channel: "#video-generation"
+    notify_on_success: true
+    notify_on_failure: true
+
+    # 通知メッセージに含める情報
+    include_video_title: true
+    include_duration: true
+    include_thumbnail: false
+
+# ロギング設定
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "./output/logs/app.log"
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# エラーハンドリング
+error_handling:
+  # エラー時のリトライ回数
+  max_retries: 3
+
+  # リトライ間隔（秒）
+  retry_delay: 5
+
+  # タイムアウト設定（秒）
+  api_timeout: 120
+
+  # エラー時にSlack通知
+  notify_on_error: true

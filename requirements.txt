@@ -6,8 +6,13 @@ pyyaml>=6.0.1
 requests>=2.31.0
 
 # Video generation
-moviepy>=1.0.3
+moviepy==1.0.3
+numpy>=1.24.0,<2.0.0
 Pillow>=10.0.0
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.9
+decorator>=4.4.2
+proglog>=0.1.10
 
 # Web scraping and RSS
 feedparser>=6.0.10

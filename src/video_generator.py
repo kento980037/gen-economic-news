@@ -313,13 +313,8 @@ class VideoGenerator:
             if len(title) > max_title_length:
                 title = title[:max_title_length] + "..."
 
-            # フォントを読み込み（デフォルトフォント使用）
-            try:
-                # システムフォントを使用（環境に応じて調整が必要）
-                font = ImageFont.truetype("/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc", font_size)
-            except:
-                logger.warning("Could not load font, using default")
-                font = ImageFont.load_default()
+            # フォントを読み込み
+            font = self._load_japanese_font(font_size)
 
             # テキストの位置を計算
             bbox = draw.textbbox((0, 0), title, font=font)
@@ -343,12 +338,7 @@ class VideoGenerator:
             # "経済ニュース" バッジを追加
             badge_text = "経済ニュース"
             badge_font_size = font_size // 3
-            try:
-                badge_font = ImageFont.truetype(
-                    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc", badge_font_size
-                )
-            except:
-                badge_font = ImageFont.load_default()
+            badge_font = self._load_japanese_font(badge_font_size)
 
             bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
             badge_width = bbox[2] - bbox[0]
@@ -375,6 +365,37 @@ class VideoGenerator:
         except Exception as e:
             logger.error(f"Error creating thumbnail: {e}")
             raise
+
+    def _load_japanese_font(self, font_size: int):
+        """
+        日本語フォントを読み込み
+
+        Args:
+            font_size: フォントサイズ
+
+        Returns:
+            フォントオブジェクト
+        """
+        # 複数のフォントパスを試す（環境に応じて）
+        font_paths = [
+            "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",  # macOS
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",  # Linux (Noto)
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",  # Linux (Noto alt)
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux (Noto Regular)
+        ]
+
+        for font_path in font_paths:
+            try:
+                if os.path.exists(font_path):
+                    logger.debug(f"Loading font: {font_path}")
+                    return ImageFont.truetype(font_path, font_size)
+            except Exception as e:
+                logger.debug(f"Could not load font {font_path}: {e}")
+                continue
+
+        # フォールバック: デフォルトフォント
+        logger.warning("Could not load Japanese font, using default font")
+        return ImageFont.load_default()
 
     def _hex_to_rgb(self, hex_color: str) -> Tuple[int, int, int]:
         """16進数カラーコードをRGBタプルに変換"""

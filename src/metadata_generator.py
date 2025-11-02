@@ -1,12 +1,12 @@
 """
 メタデータ生成モジュール
-Claude APIを使用して動画のタイトル、説明文、タグを生成
+OpenAI GPT APIを使用して動画のタイトル、説明文、タグを生成
 """
 
 import os
 import logging
 from typing import Dict, List
-from anthropic import Anthropic
+from openai import OpenAI
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -21,13 +21,13 @@ class MetadataGenerator:
             config: 設定辞書（config.yamlから読み込んだmetadata設定）
         """
         self.config = config
-        self.api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = os.getenv("OPENAI_API_KEY")
 
         if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY is not set in environment variables")
+            raise ValueError("OPENAI_API_KEY is not set in environment variables")
 
-        self.client = Anthropic(api_key=self.api_key)
-        self.model = config.get("claude_model", "claude-3-5-sonnet-20241022")
+        self.client = OpenAI(api_key=self.api_key)
+        self.model = config.get("openai_model", "gpt-4o-mini")
         self.title_config = config.get("title", {})
         self.description_config = config.get("description", {})
         self.tags_config = config.get("tags", {})
@@ -57,16 +57,16 @@ class MetadataGenerator:
         prompt = self._build_prompt(script_data, news_article)
 
         try:
-            # Claude APIを呼び出し
-            response = self.client.messages.create(
+            # OpenAI APIを呼び出し
+            response = self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=2048,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=2048,
                 temperature=0.8,
             )
 
             # レスポンスからテキストを抽出
-            response_text = response.content[0].text
+            response_text = response.choices[0].message.content
 
             # メタデータを解析
             metadata = self._parse_metadata_response(response_text)
@@ -240,14 +240,14 @@ class MetadataGenerator:
 """
 
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=256,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=256,
                 temperature=0.8,
             )
 
-            optimized_title = response.content[0].text.strip()
+            optimized_title = response.choices[0].message.content.strip()
             logger.info(f"Optimized title: {optimized_title}")
             return optimized_title
 
@@ -284,14 +284,14 @@ class MetadataGenerator:
 """
 
         try:
-            response = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=256,
                 messages=[{"role": "user", "content": prompt}],
+                max_tokens=256,
                 temperature=0.8,
             )
 
-            hashtags_text = response.content[0].text.strip()
+            hashtags_text = response.choices[0].message.content.strip()
             hashtags = [tag.strip() for tag in hashtags_text.split(",") if tag.strip()]
 
             logger.info(f"Generated hashtags: {hashtags}")

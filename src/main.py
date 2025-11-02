@@ -60,7 +60,7 @@ class VideoGenerationPipeline:
         setup_logging(self.config.get("logging", {}))
 
         # 環境変数チェック
-        required_vars = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+        required_vars = ["OPENAI_API_KEY"]
         if not validate_env_variables(required_vars):
             raise ValueError("Required environment variables are not set")
 

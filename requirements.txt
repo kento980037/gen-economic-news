@@ -1,5 +1,4 @@
 # Core dependencies
-anthropic>=0.39.0
 openai>=1.54.0
 python-dotenv>=1.0.0
 pyyaml>=6.0.1

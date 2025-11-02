@@ -1,12 +1,12 @@
 """
 台本生成モジュール
-Claude APIを使用してニュース記事から動画用の台本を生成
+OpenAI GPT APIを使用してニュース記事から動画用の台本を生成
 """
 
 import os
 import logging
 from typing import Dict, List, Optional
-from anthropic import Anthropic
+from openai import OpenAI
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -21,13 +21,13 @@ class ScriptGenerator:
             config: 設定辞書（config.yamlから読み込んだscript設定）
         """
         self.config = config
-        self.api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = os.getenv("OPENAI_API_KEY")
 
         if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY is not set in environment variables")
+            raise ValueError("OPENAI_API_KEY is not set in environment variables")
 
-        self.client = Anthropic(api_key=self.api_key)
-        self.model = config.get("claude_model", "claude-3-5-sonnet-20241022")
+        self.client = OpenAI(api_key=self.api_key)
+        self.model = config.get("openai_model", "gpt-4o-mini")
         self.min_length = config.get("min_length", 800)
         self.max_length = config.get("max_length", 2000)
         self.tone = config.get("tone", "professional")
@@ -69,17 +69,20 @@ class ScriptGenerator:
         )
 
         try:
-            # Claude APIを呼び出し
-            response = self.client.messages.create(
+            # OpenAI APIを呼び出し
+            messages = [{"role": "user", "content": user_prompt}]
+            if self.system_prompt:
+                messages.insert(0, {"role": "system", "content": self.system_prompt})
+
+            response = self.client.chat.completions.create(
                 model=self.model,
+                messages=messages,
                 max_tokens=4096,
-                system=self.system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
                 temperature=0.7,
             )
 
             # レスポンスからテキストを抽出
-            script_text = response.content[0].text
+            script_text = response.choices[0].message.content
 
             # 台本を解析
             result = self._parse_script_response(script_text, news_article)
@@ -114,15 +117,18 @@ class ScriptGenerator:
         user_prompt = self._build_multi_article_prompt(news_articles, target_chars)
 
         try:
-            response = self.client.messages.create(
+            messages = [{"role": "user", "content": user_prompt}]
+            if self.system_prompt:
+                messages.insert(0, {"role": "system", "content": self.system_prompt})
+
+            response = self.client.chat.completions.create(
                 model=self.model,
+                messages=messages,
                 max_tokens=4096,
-                system=self.system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
                 temperature=0.7,
             )
 
-            script_text = response.content[0].text
+            script_text = response.choices[0].message.content
             result = self._parse_script_response(script_text)
 
             logger.info(
@@ -335,15 +341,18 @@ class ScriptGenerator:
 """
 
         try:
-            response = self.client.messages.create(
+            messages = [{"role": "user", "content": prompt}]
+            if self.system_prompt:
+                messages.insert(0, {"role": "system", "content": self.system_prompt})
+
+            response = self.client.chat.completions.create(
                 model=self.model,
+                messages=messages,
                 max_tokens=4096,
-                system=self.system_prompt,
-                messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
             )
 
-            script_text = response.content[0].text
+            script_text = response.choices[0].message.content
             result = self._parse_script_response(script_text)
 
             logger.info("Script refined successfully")

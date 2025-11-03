@@ -236,16 +236,275 @@ class VoiceGenerator:
 
             logger.info(f"Transcribed {len(segments)} segments")
 
-            # 台本が提供されている場合は補正を適用
-            if script_text and segments:
-                segments = self._correct_subtitles_with_script(segments, script_text)
-                logger.info(f"Applied script-based correction to subtitles")
+            # 句読点ベースで再分割（より自然な区切り）
+            # 台本が提供されている場合は、台本から直接字幕を生成
+            if script_text:
+                segments = self._create_subtitles_from_script(script_text, segments)
+                logger.info(f"Created subtitles from script, count: {len(segments)}")
+            else:
+                # 台本がない場合はWhisperのテキストを句読点で再分割
+                segments = self._resegment_by_punctuation(segments)
+                logger.info(f"Resegmented by punctuation, final count: {len(segments)}")
 
             return segments
 
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
             raise
+
+    def _create_subtitles_from_script(self, script_text: str, whisper_segments: List[dict]) -> List[dict]:
+        """
+        台本から直接字幕を生成（高速版）
+        Whisperのセグメント情報は時間情報のみ使用
+
+        Args:
+            script_text: 台本テキスト
+            whisper_segments: Whisperのセグメント（時間情報用）
+
+        Returns:
+            台本ベースの字幕セグメント
+        """
+        if not whisper_segments:
+            return []
+
+        # 全体の時間範囲を取得
+        total_start = whisper_segments[0]["start"]
+        total_end = whisper_segments[-1]["end"]
+        total_duration = total_end - total_start
+
+        if total_duration <= 0:
+            logger.warning("Invalid duration, returning empty")
+            return []
+
+        # 台本を句読点で分割
+        import re
+        sentences = re.split(r'([。、])', script_text)
+
+        # 句読点を前の文に含める
+        merged_sentences = []
+        i = 0
+        while i < len(sentences):
+            if sentences[i]:
+                text = sentences[i]
+                if i + 1 < len(sentences) and sentences[i + 1] in ['。', '、']:
+                    text += sentences[i + 1]
+                    i += 2
+                else:
+                    i += 1
+                text = text.strip()
+                if text:
+                    merged_sentences.append(text)
+
+        if not merged_sentences:
+            logger.warning("No sentences from script, returning original")
+            return whisper_segments
+
+        # 文字数比率で時間を按分
+        total_chars = sum(len(s) for s in merged_sentences)
+        new_segments = []
+        current_time = total_start
+
+        for sentence in merged_sentences:
+            char_ratio = len(sentence) / total_chars if total_chars > 0 else 0
+            duration = total_duration * char_ratio
+
+            new_segments.append({
+                "start": current_time,
+                "end": current_time + duration,
+                "text": sentence
+            })
+
+            current_time += duration
+
+        logger.info(f"Created {len(new_segments)} subtitle segments from script")
+        return new_segments
+
+    def _resegment_by_punctuation(self, segments: List[dict]) -> List[dict]:
+        """
+        句読点（、。）で字幕を再分割
+        Whisperの自動分割を無視して、自然な日本語の区切りで分割する
+
+        Args:
+            segments: 字幕セグメントのリスト
+
+        Returns:
+            句読点で再分割された字幕セグメント
+        """
+        if not segments:
+            return segments
+
+        # 全セグメントを結合
+        full_text = "".join([seg["text"] for seg in segments])
+        total_start = segments[0]["start"]
+        total_end = segments[-1]["end"]
+        total_duration = total_end - total_start
+
+        if total_duration <= 0:
+            logger.warning("Invalid duration, returning original segments")
+            return segments
+
+        # 句読点で分割（「。」「、」で区切る）
+        import re
+        # 句読点の後ろで分割しつつ、句読点自体は保持
+        sentences = re.split(r'([。、])', full_text)
+
+        # 分割結果を結合（句読点を前の文に含める）
+        merged_sentences = []
+        i = 0
+        while i < len(sentences):
+            if sentences[i]:  # 空文字列をスキップ
+                text = sentences[i]
+                # 次が句読点なら結合
+                if i + 1 < len(sentences) and sentences[i + 1] in ['。', '、']:
+                    text += sentences[i + 1]
+                    i += 2
+                else:
+                    i += 1
+
+                text = text.strip()
+                if text:
+                    merged_sentences.append(text)
+
+        if not merged_sentences:
+            logger.warning("No sentences after punctuation split, returning original")
+            return segments
+
+        # 各文の文字数比率から時間を按分
+        total_chars = sum(len(s) for s in merged_sentences)
+
+        new_segments = []
+        current_time = total_start
+
+        for sentence in merged_sentences:
+            # 文字数比率で時間を計算
+            char_ratio = len(sentence) / total_chars if total_chars > 0 else 0
+            duration = total_duration * char_ratio
+
+            new_segments.append({
+                "start": current_time,
+                "end": current_time + duration,
+                "text": sentence
+            })
+
+            current_time += duration
+
+        logger.info(f"Resegmented: {len(segments)} Whisper segments → {len(new_segments)} punctuation-based segments")
+        return new_segments
+
+    def _merge_short_segments(self, segments: List[dict]) -> List[dict]:
+        """
+        短いセグメントや不自然な区切りを結合
+
+        Args:
+            segments: 字幕セグメントのリスト
+
+        Returns:
+            結合された字幕セグメント
+        """
+        if not segments:
+            return segments
+
+        merged = []
+        i = 0
+
+        while i < len(segments):
+            current = segments[i]
+            current_text = current["text"].strip()
+
+            # 次のセグメントと結合すべきか判定
+            should_merge = False
+
+            if i < len(segments) - 1:
+                next_seg = segments[i + 1]
+                next_text = next_seg["text"].strip()
+
+                # 結合条件1: 現在のセグメントが短すぎる（10文字未満）
+                if len(current_text) < 10:
+                    should_merge = True
+                    logger.debug(f"Merging short segment: '{current_text}' (length: {len(current_text)})")
+
+                # 結合条件1.5: 次のセグメントが非常に短い（3文字以下）
+                # 「さん」「です」「ます」など断片的なセグメントを拾う
+                if len(next_text) <= 3:
+                    should_merge = True
+                    logger.debug(f"Merging very short next segment: '{next_text}' (length: {len(next_text)})")
+
+                # 結合条件2: 文が不自然に途切れている（助詞で終わる、補助動詞など）
+                # 日本語の接続パターン
+                incomplete_endings = [
+                    # 助詞
+                    'が', 'は', 'を', 'に', 'で', 'と', 'から', 'まで', 'より', 'へ', 'も', 'や',
+                    # 接続助詞・活用
+                    'て', 'で', 'し', 'た', 'だ', 'な', 'ば', 'ても', 'でも',
+                    # 補助動詞の途中（完全な形と途中の形の両方）
+                    'ている', 'てい', 'ており', 'ておr', 'てお', 'ています', 'ていま', 'ていm',
+                    'している', 'してい', 'してお', 'しています', 'していま', 'してi',
+                    'されて', 'されてい', 'されており', 'されています',
+                    # 丁寧語の途中
+                    'ました', 'まし', 'です', 'でし', 'でした', 'であ', 'であり',
+                    # 形式名詞・接続詞
+                    'の', 'こと', 'もの', 'ため', 'よう', 'ところ',
+                    # 否定・推量
+                    'ない', 'なく', 'ず', 'ぬ', 'ん',
+                    'だろ', 'でしょ', 'かもし', 'らし',
+                    # 動詞の連体形（未然形・連用形含む）
+                    'る', 'れ', 'ら', 'り', 'ろ',  # 五段活用の語尾
+                    'う', 'く', 'ぐ', 'す', 'つ', 'ぬ', 'ぶ', 'む', 'ゆ', 'る',  # 動詞語幹
+                    'ま', 'み', 'め', 'も',  # マ行の活用
+                    'な', 'に', 'ね', 'の',  # ナ行の活用
+                    'さ', 'せ', 'そ',  # サ行の活用
+                    'か', 'き', 'け', 'こ',  # カ行の活用
+                ]
+
+                for ending in incomplete_endings:
+                    if current_text.endswith(ending):
+                        should_merge = True
+                        logger.debug(f"Merging incomplete phrase: '{current_text}' + '{next_text}'")
+                        break
+
+                # 結合条件2.5: 次のセグメントが補助動詞・語尾で始まる
+                incomplete_beginnings = [
+                    'ます', 'ました', 'ません', 'ませんでした',
+                    'です', 'でした', 'ではありません',
+                    'いる', 'いた', 'いない', 'います', 'いました',
+                    'おり', 'おる', 'おります',
+                    'あり', 'ある', 'あります',
+                    'など', 'なども',
+                    # 形式名詞（連体形の後に続く）
+                    'こと', 'ことが', 'ことで', 'ことに', 'ことを', 'ことは',
+                    'もの', 'ものが', 'ものの', 'ものを', 'ものは',
+                    'ため', 'ために', 'ための',
+                    'よう', 'ように', 'ような',
+                    'わけ', 'わけが', 'わけで', 'わけは',
+                    'はず', 'はずが', 'はずで', 'はずは',
+                    'つもり', 'つもりが', 'つもりで',
+                ]
+
+                for beginning in incomplete_beginnings:
+                    if next_text.startswith(beginning):
+                        should_merge = True
+                        logger.debug(f"Merging with auxiliary verb/formal noun beginning: '{current_text}' + '{next_text}'")
+                        break
+
+            if should_merge and i < len(segments) - 1:
+                # 次のセグメントと結合
+                next_seg = segments[i + 1]
+                merged_text = current_text + next_seg["text"].strip()
+
+                merged.append({
+                    "start": current["start"],
+                    "end": next_seg["end"],
+                    "text": merged_text
+                })
+
+                i += 2  # 2つ消費したので2進める
+            else:
+                # 結合しない
+                merged.append(current)
+                i += 1
+
+        logger.info(f"Segment merging: {len(segments)} → {len(merged)} segments")
+        return merged
 
     def _correct_subtitles_with_script(
         self, segments: List[dict], script_text: str
@@ -398,6 +657,10 @@ class VoiceGenerator:
         Returns:
             発音ベースの類似度（0.0～1.0）
         """
+        # 短いテキスト（10文字未満）は発音チェックをスキップ（高速化）
+        if len(text1) < 10 or len(text2) < 10:
+            return 0.0
+
         try:
             import pykakasi
 
@@ -405,14 +668,18 @@ class VoiceGenerator:
             if not hasattr(self, '_kakasi'):
                 self._kakasi = pykakasi.kakasi()
 
-            # 両方のテキストをひらがなに変換
-            kana1 = self._to_hiragana(text1)
-            kana2 = self._to_hiragana(text2)
+            # ひらがなキャッシュ（セッション内で同じテキストの変換を避ける）
+            if not hasattr(self, '_hiragana_cache'):
+                self._hiragana_cache = {}
+
+            # 両方のテキストをひらがなに変換（キャッシュ使用）
+            kana1 = self._to_hiragana_cached(text1)
+            kana2 = self._to_hiragana_cached(text2)
 
             # ひらがなレベルで比較
             if kana1 and kana2:
                 similarity = SequenceMatcher(None, kana1, kana2).ratio()
-                logger.debug(f"Phonetic comparison: '{text1}' ({kana1}) vs '{text2}' ({kana2}) = {similarity:.2f}")
+                logger.debug(f"Phonetic comparison: '{text1[:20]}...' vs '{text2[:20]}...' = {similarity:.2f}")
                 return similarity
 
         except ImportError:
@@ -422,6 +689,23 @@ class VoiceGenerator:
             logger.debug(f"Error in phonetic similarity calculation: {e}")
 
         return 0.0
+
+    def _to_hiragana_cached(self, text: str) -> str:
+        """
+        テキストをひらがなに変換（キャッシュ付き）
+
+        Args:
+            text: 変換するテキスト
+
+        Returns:
+            ひらがな文字列
+        """
+        if text in self._hiragana_cache:
+            return self._hiragana_cache[text]
+
+        hiragana = self._to_hiragana(text)
+        self._hiragana_cache[text] = hiragana
+        return hiragana
 
     def _to_hiragana(self, text: str) -> str:
         """
@@ -506,44 +790,44 @@ class VoiceGenerator:
         アルファベット略語の発音パターンを生成
 
         Args:
-            acronym: アルファベット略語（例: "CZ", "AI", "CEO"）
+            acronym: アルファベット略語（例: "CZ", "AI", "CEO", "EV"）
 
         Returns:
             発音パターンのリスト
         """
         # アルファベットの日本語発音マッピング
         pronunciation_map = {
-            'A': ['エー', 'エイ', 'A'],
-            'B': ['ビー', 'B'],
-            'C': ['シー', 'C'],
-            'D': ['ディー', 'D'],
-            'E': ['イー', 'E'],
-            'F': ['エフ', 'F'],
-            'G': ['ジー', 'G'],
-            'H': ['エイチ', 'H'],
-            'I': ['アイ', 'I'],
-            'J': ['ジェー', 'J'],
-            'K': ['ケー', 'K'],
-            'L': ['エル', 'L'],
-            'M': ['エム', 'M'],
-            'N': ['エヌ', 'N'],
-            'O': ['オー', 'O'],
-            'P': ['ピー', 'P'],
-            'Q': ['キュー', 'Q'],
-            'R': ['アール', 'R'],
-            'S': ['エス', 'S'],
-            'T': ['ティー', 'T'],
-            'U': ['ユー', 'U'],
-            'V': ['ブイ', 'V'],
-            'W': ['ダブリュー', 'W'],
-            'X': ['エックス', 'X'],
-            'Y': ['ワイ', 'Y'],
-            'Z': ['ゼット', 'ゼツ', 'ジー', 'Z'],  # Zは複数の発音がある
+            'A': ['エー', 'エイ', 'A', 'a', 'え', 'えい'],
+            'B': ['ビー', 'B', 'b', 'び'],
+            'C': ['シー', 'C', 'c', 'し'],
+            'D': ['ディー', 'D', 'd', 'でぃ'],
+            'E': ['イー', 'E', 'e', 'い', 'え'],
+            'F': ['エフ', 'F', 'f', 'えふ'],
+            'G': ['ジー', 'G', 'g', 'じ'],
+            'H': ['エイチ', 'H', 'h', 'えいち'],
+            'I': ['アイ', 'I', 'i', 'あい'],
+            'J': ['ジェー', 'J', 'j', 'じぇ'],
+            'K': ['ケー', 'K', 'k', 'け'],
+            'L': ['エル', 'L', 'l', 'える'],
+            'M': ['エム', 'M', 'm', 'えむ'],
+            'N': ['エヌ', 'N', 'n', 'えぬ'],
+            'O': ['オー', 'O', 'o', 'お'],
+            'P': ['ピー', 'P', 'p', 'ぴ'],
+            'Q': ['キュー', 'Q', 'q', 'きゅ'],
+            'R': ['アール', 'R', 'r', 'ある'],
+            'S': ['エス', 'S', 's', 'えす'],
+            'T': ['ティー', 'T', 't', 'てぃ'],
+            'U': ['ユー', 'U', 'u', 'ゆ'],
+            'V': ['ブイ', 'V', 'v', 'ぶい'],
+            'W': ['ダブリュー', 'W', 'w', 'だぶりゅ'],
+            'X': ['エックス', 'X', 'x', 'えっくす'],
+            'Y': ['ワイ', 'Y', 'y', 'わい'],
+            'Z': ['ゼット', 'ゼツ', 'ジー', 'Z', 'z', 'ぜっと', 'ぜつ'],
         }
 
         patterns = []
 
-        # パターン1: 各文字を発音に変換して連結（例: "CZ" → "シーゼット"）
+        # パターン1: 各文字を発音に変換して連結（例: "EV" → "イーブイ"）
         for i, char in enumerate(acronym):
             pronunciations = pronunciation_map.get(char.upper(), [char])
             if i == 0:
@@ -558,17 +842,45 @@ class VoiceGenerator:
         # リストを文字列に変換
         result_patterns = [''.join(p) for p in patterns]
 
-        # パターン2: カタカナ小文字表記（例: "CZ" → "Cゼツ"）
+        # パターン2: カタカナ小文字表記（例: "CZ" → "Cゼツ", "EV" → "Eブイ"）
         if len(acronym) == 2:
             first_char = acronym[0]
             second_pronunciations = pronunciation_map.get(acronym[1].upper(), [])
             for second_pron in second_pronunciations:
                 result_patterns.append(f"{first_char}{second_pron}")
+                result_patterns.append(f"{first_char.lower()}{second_pron}")
 
-        # パターン3: 元のアルファベットそのまま
+        # パターン3: 完全小文字版（例: "EV" → "ev", "eb"など）
+        result_patterns.append(acronym.lower())
+
+        # パターン4: 各文字の小文字組み合わせ（例: "ev", "eb", "iv"など）
+        # よくある誤認識パターン: E→e/i, V→v/b
+        common_misrecognitions = {
+            'E': ['e', 'i'],
+            'V': ['v', 'b'],
+            'I': ['i', 'l', '1'],
+            'O': ['o', '0'],
+            'S': ['s', '5'],
+            'Z': ['z', '2'],
+            'B': ['b', '8'],
+            'G': ['g', '9'],
+        }
+
+        if len(acronym) == 2:
+            first_variations = common_misrecognitions.get(acronym[0].upper(), [acronym[0].lower()])
+            second_variations = common_misrecognitions.get(acronym[1].upper(), [acronym[1].lower()])
+            for first in first_variations:
+                for second in second_variations:
+                    result_patterns.append(f"{first}{second}")
+
+        # パターン5: 元のアルファベットそのまま（大文字・小文字）
         result_patterns.append(acronym)
+        result_patterns.append(acronym.upper())
 
-        logger.debug(f"Generated pronunciation patterns for '{acronym}': {result_patterns}")
+        # 重複を除去
+        result_patterns = list(set(result_patterns))
+
+        logger.debug(f"Generated pronunciation patterns for '{acronym}': {result_patterns[:10]}... (total: {len(result_patterns)})")
         return result_patterns
 
     def get_available_voices(self) -> list[str]:

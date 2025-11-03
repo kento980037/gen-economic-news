@@ -68,6 +68,16 @@ class ScriptGenerator:
             news_article, target_chars, additional_context
         )
 
+        # プロンプトをログに出力
+        logger.info("=" * 80)
+        logger.info("SCRIPT GENERATION PROMPT")
+        logger.info("=" * 80)
+        if self.system_prompt:
+            logger.info(f"[SYSTEM PROMPT]\n{self.system_prompt}")
+            logger.info("-" * 80)
+        logger.info(f"[USER PROMPT]\n{user_prompt}")
+        logger.info("=" * 80)
+
         try:
             # OpenAI APIを呼び出し
             messages = [{"role": "user", "content": user_prompt}]

@@ -56,6 +56,13 @@ class MetadataGenerator:
         # プロンプトを構築
         prompt = self._build_prompt(script_data, news_article)
 
+        # プロンプトをログに出力
+        logger.info("=" * 80)
+        logger.info("METADATA GENERATION PROMPT")
+        logger.info("=" * 80)
+        logger.info(f"[PROMPT]\n{prompt}")
+        logger.info("=" * 80)
+
         try:
             # OpenAI APIを呼び出し
             response = self.client.chat.completions.create(

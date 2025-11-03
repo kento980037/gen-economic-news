@@ -120,7 +120,7 @@ metadata:
   # タイトル設定
   title:
     max_length: 100
-    include_date: true
+    include_date: false  # 日付を含めない（ニュースは常に最新のため不要）
     style: "clickbait_moderate"  # formal, clickbait_moderate, clickbait_strong
 
   # 説明文設定

@@ -160,35 +160,53 @@ class VideoGenerationPipeline:
             raise
 
     def _fetch_news(self):
-        """ニュースを取得（複数記事を集約）"""
-        # 複数のニュース記事を取得（最大3記事）
-        articles = self.news_fetcher.fetch_news()
+        """ニュースを取得"""
+        # 最新のメイン記事を取得
+        main_article = self.news_fetcher.get_top_news()
 
-        if not articles:
+        if not main_article:
             return None
 
-        # 最も重要な記事をメインとして返す（後方互換性のため）
-        # 複数記事は台本生成時に参照される
-        return articles[0]
+        return main_article
 
     def _generate_script(self, news_article):
-        """台本を生成（複数ソース参照）"""
+        """台本を生成（同じトピックの複数ソース参照）"""
         target_duration = self.config.get("app", {}).get("target_duration", 180)
 
-        # 複数記事を取得して追加コンテキストとして渡す
-        all_articles = self.news_fetcher.fetch_news()
+        # 同じトピックに関する関連記事を取得
+        related_articles = self.news_fetcher.get_related_articles(news_article, max_related=3)
 
-        # メイン記事以外を参考情報として追加
+        # 関連記事を参考情報として追加
         additional_context = None
-        if len(all_articles) > 1:
+        if related_articles:
             additional_sources = []
-            for i, article in enumerate(all_articles[1:4], 1):  # 最大3つの追加ソース
+            additional_sources.append(
+                f"【メイン記事】{news_article.title} (出典: {news_article.source})\n"
+            )
+            for i, article in enumerate(related_articles, 1):
                 additional_sources.append(
-                    f"参考記事{i}: {article.title} (出典: {article.source})\n"
-                    f"要約: {article.summary[:200]}..."
+                    f"\n【参考記事{i}】\n"
+                    f"タイトル: {article.title}\n"
+                    f"出典: {article.source}\n"
+                    f"要約: {article.summary[:300]}...\n"
+                    f"URL: {article.url}"
                 )
-            additional_context = "\n\n".join(additional_sources)
-            logger.info(f"Using {len(all_articles)} articles for script generation")
+
+            additional_context = (
+                "以下は同じトピックについて複数のメディアが報道した記事です。\n"
+                "これらの情報を総合的に分析して、多角的な視点から解説してください。\n\n"
+                + "\n".join(additional_sources)
+            )
+
+            logger.info(
+                f"Using {len(related_articles) + 1} articles (1 main + {len(related_articles)} related) "
+                f"for script generation on topic: {news_article.title[:50]}..."
+            )
+        else:
+            logger.info(
+                f"No related articles found for: {news_article.title[:50]}... "
+                f"Using single source only"
+            )
 
         return self.script_generator.generate_script(
             news_article.to_dict(),

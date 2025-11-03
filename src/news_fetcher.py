@@ -11,6 +11,8 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 import pytz
+import numpy as np
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,17 @@ class NewsFetcher:
         self.max_age_hours = config.get("max_age_hours", 24)
         self.categories = config.get("categories", ["経済", "ビジネス"])
         self.rss_feeds = config.get("rss_feeds", [])
+
+        # OpenAI クライアント（埋め込みベクトル用）
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        if self.openai_api_key:
+            self.openai_client = OpenAI(api_key=self.openai_api_key)
+        else:
+            self.openai_client = None
+            logger.warning("OPENAI_API_KEY not set, embedding-based similarity disabled")
+
+        # 埋め込みベクトルのキャッシュ
+        self.embedding_cache = {}
 
     def fetch_news(self) -> List[NewsArticle]:
         """
@@ -243,6 +256,193 @@ class NewsFetcher:
         """
         articles = self.fetch_news()
         return articles[0] if articles else None
+
+    def get_related_articles(self, main_article: NewsArticle, max_related: int = 3) -> List[NewsArticle]:
+        """
+        メイン記事に関連する記事を取得（同じトピック）
+        埋め込みベクトルを使用して意味的類似度を計算
+
+        Args:
+            main_article: メイン記事
+            max_related: 取得する関連記事の最大数
+
+        Returns:
+            関連記事のリスト
+        """
+        all_articles = self.fetch_news()
+        related = []
+
+        # メイン記事のテキストと埋め込みベクトルを取得
+        main_text = f"{main_article.title} {main_article.summary}"
+        main_embedding = self._get_embedding(main_text)
+
+        # キーワードもフォールバック用に抽出
+        main_keywords = self._extract_keywords(main_article.title)
+
+        logger.info(f"Finding related articles for: {main_article.title[:50]}...")
+
+        for article in all_articles:
+            # メイン記事自身はスキップ
+            if article.url == main_article.url or article.title == main_article.title:
+                continue
+
+            # 埋め込みベクトルを使用した類似度計算
+            if main_embedding is not None:
+                article_text = f"{article.title} {article.summary}"
+                article_embedding = self._get_embedding(article_text)
+
+                if article_embedding is not None:
+                    relevance_score = self._cosine_similarity(main_embedding, article_embedding)
+                    logger.debug(f"  - {article.title[:50]}... similarity: {relevance_score:.3f}")
+                else:
+                    # 埋め込み取得失敗時はフォールバック
+                    relevance_score = self._calculate_relevance(main_keywords, article)
+            else:
+                # 埋め込みが使えない場合はJaccard係数
+                relevance_score = self._calculate_relevance(main_keywords, article)
+
+            # 閾値を埋め込みベクトル用に調整（通常0.7-0.9が高類似、0.5-0.7が中程度）
+            threshold = 0.5 if main_embedding is not None else 0.3
+
+            if relevance_score > threshold:
+                related.append((article, relevance_score))
+
+        # スコアでソートして上位を返す
+        related.sort(key=lambda x: x[1], reverse=True)
+
+        if related:
+            logger.info(f"Found {len(related)} related articles (showing top {max_related}):")
+            for article, score in related[:max_related]:
+                logger.info(f"  - {article.source}: {article.title[:60]}... (score: {score:.3f})")
+
+        return [article for article, score in related[:max_related]]
+
+    def _extract_keywords(self, text: str) -> set:
+        """
+        テキストからキーワードを抽出
+
+        Args:
+            text: 対象テキスト
+
+        Returns:
+            キーワードのセット
+        """
+        # 一般的なストップワードを除外
+        stopwords = {
+            "の", "に", "は", "を", "が", "と", "で", "も", "へ", "から", "まで",
+            "より", "など", "について", "による", "により", "において",
+            "the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or"
+        }
+
+        # 単語に分割（簡易版）
+        import re
+        words = re.findall(r'\w+', text.lower())
+
+        # ストップワードを除外
+        keywords = {word for word in words if word not in stopwords and len(word) > 2}
+
+        return keywords
+
+    def _get_embedding(self, text: str) -> Optional[np.ndarray]:
+        """
+        テキストの埋め込みベクトルを取得
+
+        Args:
+            text: 埋め込みを取得するテキスト
+
+        Returns:
+            埋め込みベクトル（numpy配列）、またはNone
+        """
+        if not self.openai_client:
+            return None
+
+        # キャッシュチェック
+        if text in self.embedding_cache:
+            return self.embedding_cache[text]
+
+        try:
+            # OpenAI Embeddings APIを呼び出し
+            response = self.openai_client.embeddings.create(
+                model="text-embedding-3-small",  # コスト効率の良いモデル
+                input=text
+            )
+
+            # 埋め込みベクトルを取得
+            embedding = np.array(response.data[0].embedding)
+
+            # キャッシュに保存
+            self.embedding_cache[text] = embedding
+
+            return embedding
+
+        except Exception as e:
+            logger.error(f"Error getting embedding: {e}")
+            return None
+
+    def _cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
+        """
+        2つのベクトル間のコサイン類似度を計算
+
+        Args:
+            vec1: ベクトル1
+            vec2: ベクトル2
+
+        Returns:
+            コサイン類似度（-1.0～1.0、実際は0.0～1.0の範囲）
+        """
+        # ゼロベクトルチェック
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+
+        # コサイン類似度 = (A・B) / (||A|| * ||B||)
+        similarity = np.dot(vec1, vec2) / (norm1 * norm2)
+
+        return float(similarity)
+
+    def _calculate_relevance(self, main_keywords: set, article: NewsArticle) -> float:
+        """
+        記事の関連性スコアを計算（埋め込みベクトル使用）
+
+        Args:
+            main_keywords: メイン記事のキーワード（後方互換性のため残す）
+            article: 比較対象の記事
+
+        Returns:
+            関連性スコア（0.0～1.0）
+        """
+        # 埋め込みベクトルが利用可能な場合はそれを使用
+        if self.openai_client:
+            # メイン記事のテキスト（キーワードを文字列に変換）
+            main_text = " ".join(main_keywords)
+
+            # 比較記事のテキスト
+            article_text = f"{article.title} {article.summary}"
+
+            # 埋め込みベクトルを取得
+            main_embedding = self._get_embedding(main_text)
+            article_embedding = self._get_embedding(article_text)
+
+            if main_embedding is not None and article_embedding is not None:
+                # コサイン類似度を計算
+                similarity = self._cosine_similarity(main_embedding, article_embedding)
+                logger.debug(f"Embedding similarity with '{article.title[:50]}...': {similarity:.3f}")
+                return similarity
+
+        # フォールバック: Jaccard係数（埋め込みが使えない場合）
+        logger.debug("Using fallback Jaccard similarity")
+        article_keywords = self._extract_keywords(article.title + " " + article.summary)
+
+        common_keywords = main_keywords & article_keywords
+
+        if not main_keywords or not article_keywords:
+            return 0.0
+
+        jaccard = len(common_keywords) / len(main_keywords | article_keywords)
+
+        return jaccard
 
 
 def main():

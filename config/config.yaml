@@ -21,13 +21,21 @@ news:
     - "rss"  # RSSフィード
     - "newsapi"  # NewsAPI
 
-  # RSS Feed URLs
+  # RSS Feed URLs（海外メディア中心、複数ソース）
   rss_feeds:
-    - "https://news.yahoo.co.jp/rss/topics/business.xml"
-    - "https://www3.nhk.or.jp/rss/news/cat6.xml"
+    # 国際経済メディア
+    - "https://feeds.bloomberg.com/markets/news.rss"  # Bloomberg Markets
+    - "https://www.cnbc.com/id/100003114/device/rss/rss.html"  # CNBC Top News
+    - "https://www.ft.com/rss/home"  # Financial Times
+    - "https://www.economist.com/finance-and-economics/rss.xml"  # The Economist
+    - "https://www.reuters.com/markets"  # Reuters Markets (RSS auto-discovery)
+    - "https://feeds.feedburner.com/wsj/xml/rss/3_7085.xml"  # Wall Street Journal - Markets
+    # 日本語メディア（参考用）
+    - "https://news.yahoo.co.jp/rss/topics/business.xml"  # Yahoo!ニュース ビジネス
+    - "https://www3.nhk.or.jp/rss/news/cat6.xml"  # NHK 経済ニュース
 
-  # 取得記事数
-  max_articles: 5
+  # 取得記事数（複数ソースから集約）
+  max_articles: 10
 
   # ニュースの新しさ（時間単位）
   max_age_hours: 24

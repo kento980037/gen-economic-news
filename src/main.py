@@ -160,14 +160,40 @@ class VideoGenerationPipeline:
             raise
 
     def _fetch_news(self):
-        """ニュースを取得"""
-        return self.news_fetcher.get_top_news()
+        """ニュースを取得（複数記事を集約）"""
+        # 複数のニュース記事を取得（最大3記事）
+        articles = self.news_fetcher.fetch_news()
+
+        if not articles:
+            return None
+
+        # 最も重要な記事をメインとして返す（後方互換性のため）
+        # 複数記事は台本生成時に参照される
+        return articles[0]
 
     def _generate_script(self, news_article):
-        """台本を生成"""
+        """台本を生成（複数ソース参照）"""
         target_duration = self.config.get("app", {}).get("target_duration", 180)
+
+        # 複数記事を取得して追加コンテキストとして渡す
+        all_articles = self.news_fetcher.fetch_news()
+
+        # メイン記事以外を参考情報として追加
+        additional_context = None
+        if len(all_articles) > 1:
+            additional_sources = []
+            for i, article in enumerate(all_articles[1:4], 1):  # 最大3つの追加ソース
+                additional_sources.append(
+                    f"参考記事{i}: {article.title} (出典: {article.source})\n"
+                    f"要約: {article.summary[:200]}..."
+                )
+            additional_context = "\n\n".join(additional_sources)
+            logger.info(f"Using {len(all_articles)} articles for script generation")
+
         return self.script_generator.generate_script(
-            news_article.to_dict(), target_duration=target_duration
+            news_article.to_dict(),
+            target_duration=target_duration,
+            additional_context=additional_context
         )
 
     def _generate_voice(self, script_data):

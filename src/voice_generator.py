@@ -1,10 +1,11 @@
 """
 音声生成モジュール
-OpenAI TTS APIを使用してテキストから音声を生成
+OpenAI TTS APIまたはGemini TTS APIを使用してテキストから音声を生成
 """
 
 import os
 import logging
+import wave
 from pathlib import Path
 from typing import Dict, Optional, List
 from openai import OpenAI
@@ -22,16 +23,52 @@ class VoiceGenerator:
             config: 設定辞書（config.yamlから読み込んだvoice設定）
         """
         self.config = config
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.provider = config.get("provider", "openai")
 
+        # プロバイダー別の初期化
+        if self.provider == "gemini":
+            self._init_gemini()
+        else:
+            self._init_openai()
+
+    def _init_openai(self):
+        """OpenAI TTSの初期化"""
+        self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY is not set in environment variables")
 
         self.client = OpenAI(api_key=self.api_key)
-        self.model = config.get("model", "tts-1-hd")
-        self.voice = config.get("voice", "alloy")
-        self.speed = config.get("speed", 1.0)
-        self.format = config.get("format", "mp3")
+        openai_config = self.config.get("openai", {})
+        self.model = openai_config.get("model", "tts-1-hd")
+        self.voice = openai_config.get("voice", "alloy")
+        self.speed = openai_config.get("speed", 1.0)
+        self.format = openai_config.get("format", "mp3")
+        logger.info(f"Initialized OpenAI TTS: model={self.model}, voice={self.voice}")
+
+    def _init_gemini(self):
+        """Gemini TTSの初期化"""
+        try:
+            from google import genai
+            from google.genai import types
+            self.genai = genai
+            self.genai_types = types
+        except ImportError:
+            raise ImportError(
+                "google-genai package is required for Gemini TTS. "
+                "Install it with: pip install google-genai"
+            )
+
+        self.api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY or GOOGLE_API_KEY is not set in environment variables")
+
+        self.client = genai.Client(api_key=self.api_key)
+        gemini_config = self.config.get("gemini", {})
+        self.model = gemini_config.get("model", "gemini-2.5-flash-preview-tts")
+        self.voice = gemini_config.get("voice", "Kore")
+        self.format = gemini_config.get("format", "wav")
+        self.style_prompt = gemini_config.get("style_prompt", "")
+        logger.info(f"Initialized Gemini TTS: model={self.model}, voice={self.voice}")
 
     def generate_voice(
         self, text: str, output_path: str, voice: Optional[str] = None
@@ -54,28 +91,81 @@ class VoiceGenerator:
         output_dir = Path(output_path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Generating voice: {len(text)} characters")
+        logger.info(f"Generating voice ({self.provider}): {len(text)} characters")
         logger.info(f"Output path: {output_path}")
 
         try:
-            # OpenAI TTS APIを呼び出し
-            response = self.client.audio.speech.create(
-                model=self.model,
-                voice=voice or self.voice,
-                input=text,
-                speed=self.speed,
-                response_format=self.format,
-            )
-
-            # 音声データをファイルに保存
-            response.stream_to_file(output_path)
-
-            logger.info(f"Voice file generated successfully: {output_path}")
-            return output_path
+            if self.provider == "gemini":
+                return self._generate_voice_gemini(text, output_path, voice)
+            else:
+                return self._generate_voice_openai(text, output_path, voice)
 
         except Exception as e:
             logger.error(f"Error generating voice: {e}")
             raise
+
+    def _generate_voice_openai(
+        self, text: str, output_path: str, voice: Optional[str] = None
+    ) -> str:
+        """OpenAI TTSで音声を生成"""
+        response = self.client.audio.speech.create(
+            model=self.model,
+            voice=voice or self.voice,
+            input=text,
+            speed=self.speed,
+            response_format=self.format,
+        )
+
+        # 音声データをファイルに保存
+        response.stream_to_file(output_path)
+
+        logger.info(f"Voice file generated successfully (OpenAI): {output_path}")
+        return output_path
+
+    def _generate_voice_gemini(
+        self, text: str, output_path: str, voice: Optional[str] = None
+    ) -> str:
+        """Gemini TTSで音声を生成"""
+        # スタイル指示を追加（設定されている場合）
+        prompt_text = text
+        if self.style_prompt:
+            prompt_text = f"{self.style_prompt}：{text}"
+
+        # Gemini TTS APIを呼び出し
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt_text,
+            config=self.genai_types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=self.genai_types.SpeechConfig(
+                    voice_config=self.genai_types.VoiceConfig(
+                        prebuilt_voice_config=self.genai_types.PrebuiltVoiceConfig(
+                            voice_name=voice or self.voice,
+                        )
+                    )
+                ),
+            )
+        )
+
+        # 音声データを取得
+        audio_data = response.candidates[0].content.parts[0].inline_data.data
+
+        # WAVファイルとして保存（PCM audio: 24kHz, mono, 16-bit）
+        self._save_wav_file(audio_data, output_path, sample_rate=24000, channels=1, sample_width=2)
+
+        logger.info(f"Voice file generated successfully (Gemini): {output_path}")
+        return output_path
+
+    def _save_wav_file(
+        self, audio_data: bytes, output_path: str, sample_rate: int = 24000,
+        channels: int = 1, sample_width: int = 2
+    ):
+        """PCM音声データをWAVファイルとして保存"""
+        with wave.open(output_path, 'wb') as wav_file:
+            wav_file.setnchannels(channels)
+            wav_file.setsampwidth(sample_width)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(audio_data)
 
     def generate_voice_segments(
         self, text_segments: list[str], output_dir: str, prefix: str = "segment"
@@ -216,8 +306,19 @@ class VoiceGenerator:
         logger.info(f"Transcribing audio file: {audio_file}")
 
         try:
+            # OpenAI Whisperで文字起こし（プロバイダーに関係なくWhisperを使用）
+            # Gemini TTSで生成した音声でもOpenAI Whisperで文字起こし可能
+            if self.provider == "gemini":
+                # Gemini用にOpenAIクライアントを一時的に初期化
+                openai_key = os.getenv("OPENAI_API_KEY")
+                if not openai_key:
+                    raise ValueError("OPENAI_API_KEY is required for transcription")
+                openai_client = OpenAI(api_key=openai_key)
+            else:
+                openai_client = self.client
+
             with open(audio_file, "rb") as f:
-                transcript = self.client.audio.transcriptions.create(
+                transcript = openai_client.audio.transcriptions.create(
                     model="whisper-1",
                     file=f,
                     response_format="verbose_json",

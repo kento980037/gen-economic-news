@@ -66,13 +66,23 @@ script:
 
 # 音声生成設定
 voice:
-  # OpenAI TTS設定
-  model: "tts-1-hd"  # tts-1 or tts-1-hd
-  voice: "alloy"  # alloy, echo, fable, onyx, nova, shimmer
-  speed: 1.0  # 0.25 to 4.0
+  # TTS プロバイダー選択
+  provider: "gemini"  # "openai" or "gemini"
 
-  # 音声ファイル形式
-  format: "mp3"  # mp3, opus, aac, flac
+  # OpenAI TTS設定
+  openai:
+    model: "tts-1-hd"  # tts-1 or tts-1-hd
+    voice: "alloy"  # alloy, echo, fable, onyx, nova, shimmer
+    speed: 1.0  # 0.25 to 4.0
+    format: "mp3"  # mp3, opus, aac, flac
+
+  # Gemini TTS設定
+  gemini:
+    model: "gemini-2.5-flash-preview-tts"  # gemini-2.5-flash-preview-tts or gemini-2.5-pro-preview-tts
+    voice: "Kore"  # 30種類の声から選択（AI Studio で試聴可能）
+    format: "wav"  # PCM audio (24kHz, mono, 16-bit)
+    # 音声スタイルのカスタマイズ用プロンプト（オプション）
+    style_prompt: "落ち着いた、プロフェッショナルなナレーション口調で"
 
   # 音量調整
   volume: 1.0

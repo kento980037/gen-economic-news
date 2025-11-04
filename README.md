@@ -6,7 +6,7 @@ AIを活用して経済ニュースの解説動画を自動生成するシステ
 
 - 最新の経済ニュースを自動取得（RSS/NewsAPI）
 - Claude APIによる自然な日本語台本の自動生成
-- OpenAI TTS APIによる高品質な音声合成
+- OpenAI TTS または Gemini TTS による高品質な音声合成（選択可能）
 - 動画・サムネイル・メタデータの自動生成
 - Renderでのcron実行またはGitHub Actionsでのスケジュール実行
 - Slack通知機能
@@ -41,8 +41,8 @@ gen-economic-news/
 - Python 3.11以上
 - FFmpeg
 - 以下のAPIキー:
-  - Anthropic Claude API
-  - OpenAI API
+  - Anthropic Claude API（台本生成用）
+  - OpenAI API（音声生成・文字起こし用）または Gemini API（音声生成用）
   - NewsAPI（オプション）
 
 ## セットアップ
@@ -97,7 +97,10 @@ cp .env.example .env
 ```env
 # 必須
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
-OPENAI_API_KEY=your_openai_api_key_here
+
+# 音声生成用（いずれか必須）
+OPENAI_API_KEY=your_openai_api_key_here      # OpenAI TTS使用時
+GEMINI_API_KEY=your_gemini_api_key_here      # Gemini TTS使用時
 
 # オプション
 NEWS_API_KEY=your_newsapi_key_here
@@ -260,10 +263,25 @@ script:
 
 ```yaml
 voice:
-  model: "tts-1-hd"  # tts-1 または tts-1-hd
-  voice: "alloy"     # alloy, echo, fable, onyx, nova, shimmer
-  speed: 1.0         # 0.25 to 4.0
+  # プロバイダーを選択（"openai" または "gemini"）
+  provider: "gemini"  # Geminiの方が自然な日本語音声を生成
+
+  # OpenAI TTS設定
+  openai:
+    model: "tts-1-hd"  # tts-1 または tts-1-hd
+    voice: "alloy"     # alloy, echo, fable, onyx, nova, shimmer
+    speed: 1.0         # 0.25 to 4.0
+    format: "mp3"
+
+  # Gemini TTS設定（より自然な日本語）
+  gemini:
+    model: "gemini-2.5-flash-preview-tts"
+    voice: "Kore"  # 30種類の声から選択可能
+    format: "wav"
+    style_prompt: "落ち着いた、プロフェッショナルなナレーション口調で"
 ```
+
+**利用可能な声の試聴**: [Google AI Studio](https://aistudio.google.com/generate-speech)で全30種類の声を試聴できます。
 
 ### 動画デザインの変更
 

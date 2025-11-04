@@ -1,5 +1,6 @@
 # Core dependencies
 openai>=1.54.0
+google-genai>=0.2.0  # For Gemini TTS
 python-dotenv>=1.0.0
 pyyaml>=6.0.1
 requests>=2.31.0

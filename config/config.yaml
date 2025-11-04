@@ -35,7 +35,7 @@ news:
     - "https://www3.nhk.or.jp/rss/news/cat6.xml"  # NHK 経済ニュース
 
   # 取得記事数（複数ソースから集約）
-  max_articles: 100
+  max_articles: 10
 
   # ニュースの新しさ（時間単位）
   max_age_hours: 24

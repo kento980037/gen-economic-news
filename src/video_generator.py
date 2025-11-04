@@ -348,7 +348,16 @@ class VideoGenerator:
         font_size = 40  # 字幕用のフォントサイズ
         text_color = (255, 255, 255, 255)  # 白
 
+        # 字幕設定を取得
+        subtitle_config = self.config.get("subtitle", {})
+        global_offset = subtitle_config.get("global_offset", 0.0)
+        start_offset = subtitle_config.get("start_offset", 0.0)
+        end_offset = subtitle_config.get("end_offset", 0.0)
+        min_duration = subtitle_config.get("min_duration", 0.5)
+        max_duration = subtitle_config.get("max_duration", 10.0)
+
         logger.info(f"Creating {len(subtitles)} subtitle clips")
+        logger.info(f"Subtitle timing: global_offset={global_offset}s, start_offset={start_offset}s, end_offset={end_offset}s")
 
         for subtitle in subtitles:
             start_time = subtitle.get("start", 0)
@@ -358,11 +367,37 @@ class VideoGenerator:
             if not text or end_time <= start_time:
                 continue
 
+            # オフセットを適用
+            start_time += global_offset + start_offset
+            end_time += global_offset + end_offset
+
+            # 継続時間を計算
+            subtitle_duration = end_time - start_time
+
+            # 最小/最大表示時間を適用
+            if subtitle_duration < min_duration:
+                # 短すぎる場合は最小時間まで延長
+                end_time = start_time + min_duration
+                subtitle_duration = min_duration
+                logger.debug(f"Extended short subtitle to {min_duration}s: '{text[:20]}...'")
+            elif subtitle_duration > max_duration:
+                # 長すぎる場合は最大時間に制限
+                end_time = start_time + max_duration
+                subtitle_duration = max_duration
+                logger.debug(f"Capped long subtitle to {max_duration}s: '{text[:20]}...'")
+
             # 字幕が動画の長さを超える場合は調整
             if start_time >= duration:
+                logger.debug(f"Skipped subtitle starting after video end: '{text[:20]}...'")
                 continue
             if end_time > duration:
                 end_time = duration
+                logger.debug(f"Adjusted subtitle end time to video duration: '{text[:20]}...'")
+
+            # 開始時間が負の場合は0に調整
+            if start_time < 0:
+                logger.warning(f"Subtitle start time was negative ({start_time}s), adjusted to 0")
+                start_time = 0
 
             # 字幕画像を生成
             subtitle_img = self._create_text_image(

@@ -289,7 +289,7 @@ class VoiceGenerator:
             return self.generate_voice_segments(segments, output_dir, filename)
 
     def transcribe_audio_with_timestamps(
-        self, audio_file: str, script_text: Optional[str] = None
+        self, audio_file: str, script_text: Optional[str] = None, subtitle_config: Optional[Dict] = None
     ) -> list[dict]:
         """
         音声ファイルをWhisperで文字起こしし、タイムスタンプ付きのセグメントを返す
@@ -298,12 +298,17 @@ class VoiceGenerator:
         Args:
             audio_file: 音声ファイルパス
             script_text: 台本テキスト（オプション）
+            subtitle_config: 字幕設定（オフセット等、オプション）
 
         Returns:
             タイムスタンプ付きセグメントのリスト
             [{"start": 0.0, "end": 2.5, "text": "こんにちは"}, ...]
         """
         logger.info(f"Transcribing audio file: {audio_file}")
+
+        # 字幕設定のデフォルト値
+        if subtitle_config is None:
+            subtitle_config = {}
 
         try:
             # OpenAI Whisperで文字起こし（プロバイダーに関係なくWhisperを使用）

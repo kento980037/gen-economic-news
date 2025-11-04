@@ -231,12 +231,16 @@ class VideoGenerationPipeline:
         logger.info("Generating subtitles from audio with script-based correction...")
         subtitles = []
         try:
+            # 字幕設定を取得
+            subtitle_config = self.config.get("video", {}).get("subtitle", {})
+
             # 最初の音声ファイルから字幕を取得
             # 台本テキストを渡して認識精度を向上
             if audio_files:
                 subtitles = self.voice_generator.transcribe_audio_with_timestamps(
                     audio_files[0],
-                    script_text=script_data.get("script")  # 台本を渡す
+                    script_text=script_data.get("script"),  # 台本を渡す
+                    subtitle_config=subtitle_config  # 字幕設定を渡す
                 )
                 logger.info(f"Generated {len(subtitles)} subtitle segments with script correction")
         except Exception as e:

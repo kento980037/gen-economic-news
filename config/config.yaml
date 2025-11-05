@@ -70,7 +70,8 @@ script:
 # 音声生成設定
 voice:
   # TTS プロバイダー選択
-  provider: "gemini"  # "openai" or "gemini"
+  # "openai" = 安定性高い、"gemini" = 自然な発音
+  provider: "gemini"  # Gemini TTS使用（自然な日本語発音）
 
   # OpenAI TTS設定
   openai:

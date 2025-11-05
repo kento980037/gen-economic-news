@@ -71,7 +71,7 @@ class VoiceGenerator:
         logger.info(f"Initialized Gemini TTS: model={self.model}, voice={self.voice}")
 
     def generate_voice(
-        self, text: str, output_path: str, voice: Optional[str] = None
+        self, text: str, output_path: str, voice: Optional[str] = None, retry_count: int = 0
     ) -> str:
         """
         テキストから音声ファイルを生成
@@ -80,6 +80,7 @@ class VoiceGenerator:
             text: 読み上げるテキスト
             output_path: 出力ファイルパス
             voice: 使用する声（None の場合は設定ファイルの声を使用）
+            retry_count: リトライ回数（内部使用）
 
         Returns:
             生成された音声ファイルのパス
@@ -94,6 +95,8 @@ class VoiceGenerator:
         logger.info(f"Generating voice ({self.provider}): {len(text)} characters")
         logger.info(f"Output path: {output_path}")
 
+        max_retries = 3
+
         try:
             if self.provider == "gemini":
                 return self._generate_voice_gemini(text, output_path, voice)
@@ -101,7 +104,18 @@ class VoiceGenerator:
                 return self._generate_voice_openai(text, output_path, voice)
 
         except Exception as e:
-            logger.error(f"Error generating voice: {e}")
+            logger.error(f"Error generating voice with {self.provider}: {e}")
+
+            # リトライロジック
+            if retry_count < max_retries:
+                import time
+                wait_time = 2 ** retry_count  # 指数バックオフ: 1秒, 2秒, 4秒
+                logger.warning(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/{max_retries})")
+                time.sleep(wait_time)
+                return self.generate_voice(text, output_path, voice, retry_count + 1)
+
+            # 最大リトライ後は失敗として処理を停止
+            logger.error(f"Failed to generate voice after {max_retries} retries. Stopping pipeline.")
             raise
 
     def _generate_voice_openai(

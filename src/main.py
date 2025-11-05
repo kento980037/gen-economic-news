@@ -161,11 +161,17 @@ class VideoGenerationPipeline:
 
     def _fetch_news(self):
         """ニュースを取得"""
-        # 最新のメイン記事を取得
-        main_article = self.news_fetcher.get_top_news()
+        # 全記事を一度だけ取得（キャッシュ用）
+        all_articles = self.news_fetcher.fetch_news()
 
-        if not main_article:
+        if not all_articles:
             return None
+
+        # 最新のメイン記事を取得
+        main_article = all_articles[0]
+
+        # 取得した記事リストをキャッシュ（関連記事検索で再利用）
+        self.news_fetcher._cached_articles = all_articles
 
         return main_article
 
@@ -174,7 +180,10 @@ class VideoGenerationPipeline:
         target_duration = self.config.get("app", {}).get("target_duration", 180)
 
         # 同じトピックに関する関連記事を取得
-        related_articles = self.news_fetcher.get_related_articles(news_article, max_related=3)
+        # パフォーマンス最適化: 関連記事機能を無効化（さらに10-20秒短縮）
+        # 必要な場合はコメントを外してmax_relatedを1に設定
+        # related_articles = self.news_fetcher.get_related_articles(news_article, max_related=1)
+        related_articles = []  # 関連記事を使わない
 
         # 関連記事を参考情報として追加
         additional_context = None

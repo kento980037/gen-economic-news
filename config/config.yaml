@@ -21,21 +21,24 @@ news:
     - "rss"  # RSSフィード
     - "newsapi"  # NewsAPI
 
-  # RSS Feed URLs（海外メディア中心、複数ソース）
+  # RSS Feed URLs（高速化のため最小限に削減）
   rss_feeds:
-    # 国際経済メディア
+    # 高速で安定したフィードのみ使用
     - "https://feeds.bloomberg.com/markets/news.rss"  # Bloomberg Markets
-    - "https://www.cnbc.com/id/100003114/device/rss/rss.html"  # CNBC Top News
-    - "https://www.ft.com/rss/home"  # Financial Times
-    - "https://www.economist.com/finance-and-economics/rss.xml"  # The Economist
-    - "https://www.reuters.com/markets"  # Reuters Markets (RSS auto-discovery)
-    - "https://feeds.feedburner.com/wsj/xml/rss/3_7085.xml"  # Wall Street Journal - Markets
-    # 日本語メディア（参考用）
-    - "https://news.yahoo.co.jp/rss/topics/business.xml"  # Yahoo!ニュース ビジネス
     - "https://www3.nhk.or.jp/rss/news/cat6.xml"  # NHK 経済ニュース
+    # 以下はコメントアウト（必要に応じて有効化）
+    # - "https://www.cnbc.com/id/100003114/device/rss/rss.html"  # CNBC Top News
+    # - "https://www.ft.com/rss/home"  # Financial Times
+    # - "https://www.economist.com/finance-and-economics/rss.xml"  # The Economist
+    # - "https://www.reuters.com/markets"  # Reuters Markets
+    # - "https://feeds.feedburner.com/wsj/xml/rss/3_7085.xml"  # WSJ Markets
+    # - "https://news.yahoo.co.jp/rss/topics/business.xml"  # Yahoo!ニュース
+
+  # RSS取得タイムアウト（秒）
+  rss_timeout: 10
 
   # 取得記事数（複数ソースから集約）
-  max_articles: 10
+  max_articles: 5  # 10 → 5に削減
 
   # ニュースの新しさ（時間単位）
   max_age_hours: 24
@@ -45,9 +48,9 @@ script:
   # OpenAI モデル (gpt-4o-mini or gpt-4o)
   openai_model: "gpt-4o-mini"
 
-  # 台本の長さ（文字数）
-  min_length: 800
-  max_length: 2000
+  # 台本の長さ（文字数）- 高速化のため短縮
+  min_length: 500   # 800 → 500
+  max_length: 1200  # 2000 → 1200 (約60%削減)
 
   # スタイル設定
   tone: "professional"  # professional, casual, friendly
@@ -89,13 +92,26 @@ voice:
 
 # 動画生成設定
 video:
-  # 動画解像度
+  # 動画解像度（高速化のため540pに削減）
+  # 静止画なので低解像度でも十分視聴可能
   resolution:
-    width: 1920
-    height: 1080
+    width: 960   # 1920 → 960 (50%削減、さらに高速化)
+    height: 540  # 1080 → 540
 
-  # フレームレート
-  fps: 30
+  # フレームレート（静止画なので大幅削減）
+  # 静止画+音声+字幕なので低FPSでも問題なし
+  fps: 10  # 24 → 10 (60%削減、字幕の滑らかさは維持)
+
+  # エンコード設定（高速化優先）
+  encoding:
+    # エンコードプリセット: ultrafast, superfast, veryfast, faster, fast, medium, slow
+    # ultrafastが最速（品質は若干落ちるが静止画なので問題なし）
+    preset: "ultrafast"
+    # CRF値: 低いほど高品質だが遅い（0-51、デフォルト23）
+    # 静止画なので28でも十分
+    crf: 28
+    # スレッド数（0=自動）
+    threads: 0
 
   # 背景設定
   background:
@@ -124,8 +140,8 @@ video:
     # グローバルオフセット（秒）
     # 正の値: 字幕を遅らせる（音声より遅く表示）
     # 負の値: 字幕を早める（音声より早く表示）
-    # 字幕が音声より早い場合は、正の値を設定（例: 0.3）
-    global_offset: 0.0
+    # 字幕が音声より1.5秒早いので、1.5秒遅らせる
+    global_offset: 1.5
 
     # 各セグメントの開始時間オフセット（秒）
     # 字幕の出現タイミングを微調整
@@ -137,11 +153,17 @@ video:
 
     # 最小表示時間（秒）
     # 短すぎる字幕を防ぐ（読みやすさ向上）
-    min_duration: 0.5
+    # 最低1秒間は表示する
+    min_duration: 1.0
 
     # 最大表示時間（秒）
     # 長すぎる字幕を制限
     max_duration: 10.0
+
+    # 字幕間の最小ギャップ（秒）
+    # 字幕の切り替わりを見やすくするための小休止
+    # 0の場合は連続表示
+    min_gap: 0.1
 
   # サムネイル設定
   thumbnail:

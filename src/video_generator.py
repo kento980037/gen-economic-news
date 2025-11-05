@@ -109,6 +109,15 @@ class VideoGenerator:
 
             # 動画を書き出し
             logger.info(f"Writing video to: {output_path}")
+
+            # エンコード設定を取得
+            encoding_config = self.config.get("encoding", {})
+            preset = encoding_config.get("preset", "medium")
+            crf = encoding_config.get("crf", 23)
+            threads = encoding_config.get("threads", 0)
+
+            logger.info(f"Encoding settings: preset={preset}, crf={crf}, threads={threads}")
+
             video.write_videofile(
                 output_path,
                 fps=self.fps,
@@ -117,6 +126,8 @@ class VideoGenerator:
                 temp_audiofile="temp-audio.m4a",
                 remove_temp=True,
                 logger=None,  # MoviePyのログを抑制
+                preset=preset,
+                ffmpeg_params=["-crf", str(crf), "-threads", str(threads)]
             )
 
             # クリーンアップ
@@ -355,9 +366,13 @@ class VideoGenerator:
         end_offset = subtitle_config.get("end_offset", 0.0)
         min_duration = subtitle_config.get("min_duration", 0.5)
         max_duration = subtitle_config.get("max_duration", 10.0)
+        min_gap = subtitle_config.get("min_gap", 0.0)
 
         logger.info(f"Creating {len(subtitles)} subtitle clips")
         logger.info(f"Subtitle timing: global_offset={global_offset}s, start_offset={start_offset}s, end_offset={end_offset}s")
+        logger.info(f"Subtitle constraints: min_duration={min_duration}s, max_duration={max_duration}s, min_gap={min_gap}s")
+
+        previous_end_time = None
 
         for subtitle in subtitles:
             start_time = subtitle.get("start", 0)
@@ -367,9 +382,18 @@ class VideoGenerator:
             if not text or end_time <= start_time:
                 continue
 
+            # 開始時間が負の場合は0に調整（オフセット適用前にチェック）
+            if start_time < 0:
+                start_time = 0
+
             # オフセットを適用
             start_time += global_offset + start_offset
             end_time += global_offset + end_offset
+
+            # 開始時間が負になった場合は0に調整
+            if start_time < 0:
+                logger.warning(f"Subtitle start time was negative ({start_time}s), adjusted to 0")
+                start_time = 0
 
             # 継続時間を計算
             subtitle_duration = end_time - start_time
@@ -392,12 +416,24 @@ class VideoGenerator:
                 continue
             if end_time > duration:
                 end_time = duration
+                # 最小表示時間を確保
+                if end_time - start_time < min_duration:
+                    start_time = max(0, end_time - min_duration)
                 logger.debug(f"Adjusted subtitle end time to video duration: '{text[:20]}...'")
 
-            # 開始時間が負の場合は0に調整
-            if start_time < 0:
-                logger.warning(f"Subtitle start time was negative ({start_time}s), adjusted to 0")
-                start_time = 0
+            # 最終的な継続時間を再計算して確認
+            final_duration = end_time - start_time
+            if final_duration < 0.1:
+                logger.warning(f"Subtitle duration too short ({final_duration}s), skipping: '{text[:20]}...'")
+                continue
+
+            # 前の字幕との最小ギャップを確保
+            if previous_end_time is not None and min_gap > 0:
+                if start_time < previous_end_time + min_gap:
+                    # 開始時間を調整して最小ギャップを確保
+                    start_time = previous_end_time + min_gap
+                    end_time = start_time + final_duration
+                    logger.debug(f"Adjusted start time to maintain gap: '{text[:20]}...'")
 
             # 字幕画像を生成
             subtitle_img = self._create_text_image(
@@ -421,6 +457,9 @@ class VideoGenerator:
             subtitle_clip = subtitle_clip.set_duration(end_time - start_time)
 
             clips.append(subtitle_clip)
+
+            # 次の字幕のギャップ計算用に記録
+            previous_end_time = end_time
 
         logger.info(f"Created {len(clips)} subtitle clips")
         return clips

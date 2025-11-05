@@ -77,6 +77,9 @@ class NewsFetcher:
         # 埋め込みベクトルのキャッシュ
         self.embedding_cache = {}
 
+        # 記事キャッシュ（重複fetch_news()を防ぐ）
+        self._cached_articles = None
+
     def fetch_news(self) -> List[NewsArticle]:
         """
         複数のソースからニュースを取得
@@ -110,11 +113,20 @@ class NewsFetcher:
         """RSSフィードからニュースを取得"""
         articles = []
         cutoff_time = datetime.now(pytz.UTC) - timedelta(hours=self.max_age_hours)
+        rss_timeout = self.config.get("rss_timeout", 10)  # デフォルト10秒
 
         for feed_url in self.rss_feeds:
             try:
-                logger.debug(f"Parsing RSS feed: {feed_url}")
+                logger.debug(f"Parsing RSS feed: {feed_url} (timeout: {rss_timeout}s)")
+
+                # タイムアウト付きでRSSを取得
+                import socket
+                original_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(rss_timeout)
+
                 feed = feedparser.parse(feed_url)
+
+                socket.setdefaulttimeout(original_timeout)
 
                 for entry in feed.entries:
                     # 公開日時を取得
@@ -135,6 +147,12 @@ class NewsFetcher:
 
             except Exception as e:
                 logger.error(f"Error fetching RSS feed {feed_url}: {e}")
+                # タイムアウトをリセット
+                try:
+                    import socket
+                    socket.setdefaulttimeout(None)
+                except:
+                    pass
 
         logger.info(f"Fetched {len(articles)} articles from RSS feeds")
         return articles
@@ -269,7 +287,14 @@ class NewsFetcher:
         Returns:
             関連記事のリスト
         """
-        all_articles = self.fetch_news()
+        # キャッシュされた記事を使用（パフォーマンス最適化）
+        if self._cached_articles is not None:
+            logger.info("Using cached articles for related article search")
+            all_articles = self._cached_articles
+        else:
+            logger.info("No cached articles, fetching fresh articles")
+            all_articles = self.fetch_news()
+
         related = []
 
         # メイン記事のテキストと埋め込みベクトルを取得
@@ -281,15 +306,22 @@ class NewsFetcher:
 
         logger.info(f"Finding related articles for: {main_article.title[:50]}...")
 
-        for article in all_articles:
-            # メイン記事自身はスキップ
-            if article.url == main_article.url or article.title == main_article.title:
-                continue
+        # 埋め込みベクトルをバッチで取得（高速化）
+        if main_embedding is not None:
+            # 全記事のテキストをまとめて準備
+            candidate_articles = [a for a in all_articles
+                                 if a.url != main_article.url and a.title != main_article.title]
 
-            # 埋め込みベクトルを使用した類似度計算
-            if main_embedding is not None:
-                article_text = f"{article.title} {article.summary}"
-                article_embedding = self._get_embedding(article_text)
+            # 高速化: 最大5記事に制限してEmbedding APIコールを削減
+            candidate_articles = candidate_articles[:min(5, len(candidate_articles))]
+
+            article_texts = [f"{a.title} {a.summary}" for a in candidate_articles]
+
+            # バッチで埋め込みベクトルを取得（個別に取得するより高速）
+            article_embeddings = self._get_embeddings_batch(article_texts)
+
+            for i, article in enumerate(candidate_articles):
+                article_embedding = article_embeddings[i] if i < len(article_embeddings) else None
 
                 if article_embedding is not None:
                     relevance_score = self._cosine_similarity(main_embedding, article_embedding)
@@ -297,15 +329,23 @@ class NewsFetcher:
                 else:
                     # 埋め込み取得失敗時はフォールバック
                     relevance_score = self._calculate_relevance(main_keywords, article)
-            else:
-                # 埋め込みが使えない場合はJaccard係数
+
+                # 閾値を埋め込みベクトル用に調整（通常0.7-0.9が高類似、0.5-0.7が中程度）
+                threshold = 0.5
+
+                if relevance_score > threshold:
+                    related.append((article, relevance_score))
+        else:
+            # 埋め込みが使えない場合はキーワードベースで検索
+            for article in all_articles:
+                if article.url == main_article.url or article.title == main_article.title:
+                    continue
+
                 relevance_score = self._calculate_relevance(main_keywords, article)
+                threshold = 0.3
 
-            # 閾値を埋め込みベクトル用に調整（通常0.7-0.9が高類似、0.5-0.7が中程度）
-            threshold = 0.5 if main_embedding is not None else 0.3
-
-            if relevance_score > threshold:
-                related.append((article, relevance_score))
+                if relevance_score > threshold:
+                    related.append((article, relevance_score))
 
         # スコアでソートして上位を返す
         related.sort(key=lambda x: x[1], reverse=True)
@@ -378,6 +418,56 @@ class NewsFetcher:
         except Exception as e:
             logger.error(f"Error getting embedding: {e}")
             return None
+
+    def _get_embeddings_batch(self, texts: List[str]) -> List[Optional[np.ndarray]]:
+        """
+        複数テキストの埋め込みベクトルを一括取得（高速化）
+
+        Args:
+            texts: 埋め込みを取得するテキストのリスト
+
+        Returns:
+            埋め込みベクトルのリスト
+        """
+        if not self.openai_client or not texts:
+            return [None] * len(texts)
+
+        results = []
+        uncached_texts = []
+        uncached_indices = []
+
+        # キャッシュをチェック
+        for i, text in enumerate(texts):
+            if text in self.embedding_cache:
+                results.append(self.embedding_cache[text])
+            else:
+                results.append(None)
+                uncached_texts.append(text)
+                uncached_indices.append(i)
+
+        # キャッシュにないテキストをバッチで取得
+        if uncached_texts:
+            try:
+                logger.info(f"Fetching {len(uncached_texts)} embeddings in batch")
+                response = self.openai_client.embeddings.create(
+                    model="text-embedding-3-small",
+                    input=uncached_texts
+                )
+
+                # 結果を格納
+                for i, data in enumerate(response.data):
+                    embedding = np.array(data.embedding)
+                    text = uncached_texts[i]
+                    original_index = uncached_indices[i]
+
+                    # キャッシュに保存
+                    self.embedding_cache[text] = embedding
+                    results[original_index] = embedding
+
+            except Exception as e:
+                logger.error(f"Error getting batch embeddings: {e}")
+
+        return results
 
     def _cosine_similarity(self, vec1: np.ndarray, vec2: np.ndarray) -> float:
         """

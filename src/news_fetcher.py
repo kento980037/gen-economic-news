@@ -265,6 +265,90 @@ class NewsFetcher:
         )
         return unique_articles
 
+    def select_main_article_by_clustering(self, articles: List[NewsArticle]) -> tuple[NewsArticle, List[NewsArticle]]:
+        """
+        記事をクラスタリングして、最も多く報道されているトピックのメイン記事と関連記事を選択
+
+        Args:
+            articles: 記事のリスト
+
+        Returns:
+            (メイン記事, 同じクラスタの関連記事リスト)
+        """
+        if not articles:
+            return None, []
+
+        if len(articles) == 1:
+            return articles[0], []
+
+        logger.info(f"Clustering {len(articles)} articles to find the most important topic...")
+
+        # 1. 全記事の埋め込みベクトルを取得
+        article_texts = [f"{a.title} {a.summary}" for a in articles]
+        embeddings = self._get_embeddings_batch(article_texts)
+
+        # 埋め込み取得に失敗した場合は最新記事を返す
+        valid_embeddings = [e for e in embeddings if e is not None]
+        if len(valid_embeddings) < 2:
+            logger.warning("Not enough embeddings for clustering, using latest article")
+            return articles[0], []
+
+        # 2. 類似度マトリクスを計算
+        n = len(embeddings)
+        similarity_matrix = np.zeros((n, n))
+
+        for i in range(n):
+            if embeddings[i] is None:
+                continue
+            for j in range(i + 1, n):
+                if embeddings[j] is None:
+                    continue
+                sim = self._cosine_similarity(embeddings[i], embeddings[j])
+                similarity_matrix[i][j] = sim
+                similarity_matrix[j][i] = sim
+
+        # 3. 簡易クラスタリング（閾値ベース）
+        # 類似度が0.6以上の記事を同じクラスタとする
+        threshold = 0.6
+        clusters = []
+        assigned = set()
+
+        for i in range(n):
+            if i in assigned or embeddings[i] is None:
+                continue
+
+            # 新しいクラスタを作成
+            cluster = [i]
+            assigned.add(i)
+
+            # 類似した記事を同じクラスタに追加
+            for j in range(n):
+                if j not in assigned and embeddings[j] is not None:
+                    if similarity_matrix[i][j] >= threshold:
+                        cluster.append(j)
+                        assigned.add(j)
+
+            clusters.append(cluster)
+
+        # 4. 最大クラスタを選択
+        largest_cluster = max(clusters, key=len)
+
+        logger.info(f"Found {len(clusters)} clusters. Largest cluster has {len(largest_cluster)} articles:")
+        for idx in largest_cluster:
+            logger.info(f"  - {articles[idx].source}: {articles[idx].title[:60]}...")
+
+        # 5. クラスタ内で最新の記事をメインに選ぶ
+        cluster_articles = [articles[idx] for idx in largest_cluster]
+        cluster_articles.sort(key=lambda a: a.published_at, reverse=True)
+
+        main_article = cluster_articles[0]
+        related_articles = cluster_articles[1:]  # 残りを関連記事に
+
+        logger.info(f"Selected main article: {main_article.source} - {main_article.title[:60]}...")
+        logger.info(f"Related articles in same cluster: {len(related_articles)}")
+
+        return main_article, related_articles
+
     def get_top_news(self) -> Optional[NewsArticle]:
         """
         最も重要なニュースを1つ取得

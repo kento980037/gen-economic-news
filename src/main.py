@@ -163,17 +163,26 @@ class VideoGenerationPipeline:
             raise
 
     def _fetch_news(self):
-        """ニュースを取得"""
-        # 全記事を一度だけ取得（キャッシュ用）
+        """ニュースを取得（クラスタリングベース）"""
+        # 全記事を一度だけ取得
         all_articles = self.news_fetcher.fetch_news()
 
         if not all_articles:
             return None
 
-        # 最新のメイン記事を取得
-        main_article = all_articles[0]
+        # クラスタリングで最も報道されているトピックを選択
+        logger.info("Selecting main article using clustering algorithm...")
+        main_article, cluster_related = self.news_fetcher.select_main_article_by_clustering(all_articles)
 
-        # 取得した記事リストをキャッシュ（関連記事検索で再利用）
+        if not main_article:
+            logger.warning("Clustering failed, falling back to latest article")
+            main_article = all_articles[0]
+            cluster_related = []
+
+        # クラスタ内の関連記事を保存（同じトピックの記事）
+        self.related_articles = cluster_related
+
+        # 取得した記事リストをキャッシュ（追加の関連記事検索で再利用）
         self.news_fetcher._cached_articles = all_articles
 
         return main_article
@@ -182,9 +191,32 @@ class VideoGenerationPipeline:
         """台本を生成（同じトピックの複数ソース参照）"""
         target_duration = self.config.get("app", {}).get("target_duration", 180)
 
-        # 同じトピックに関する関連記事を取得（複数記事参照を有効化）
-        # 金融ニュースの多角的な分析のため、最大3つの関連記事を参照
-        related_articles = self.news_fetcher.get_related_articles(news_article, max_related=3)
+        # クラスタリングで既に関連記事が取得されている
+        cluster_related = self.related_articles
+
+        # 追加で動的検索も実行（クラスタに含まれない記事も探す）
+        logger.info(f"Already have {len(cluster_related)} articles from clustering")
+
+        # 動的検索で追加の関連記事を探す（最大3記事）
+        max_additional = max(0, 3 - len(cluster_related))
+        additional_related = []
+
+        if max_additional > 0:
+            logger.info(f"Searching for up to {max_additional} additional related articles...")
+            additional_related = self.news_fetcher.get_related_articles(
+                news_article, max_related=max_additional
+            )
+
+            # クラスタ記事と重複しないようにフィルタ
+            cluster_urls = {a.url for a in cluster_related}
+            additional_related = [a for a in additional_related if a.url not in cluster_urls]
+            logger.info(f"Found {len(additional_related)} additional related articles")
+
+        # 関連記事を統合（クラスタ記事を優先）
+        related_articles = cluster_related + additional_related
+
+        # 最大3記事に制限
+        related_articles = related_articles[:3]
 
         # 関連記事をインスタンス変数に保存（メタデータ生成で使用）
         self.related_articles = related_articles

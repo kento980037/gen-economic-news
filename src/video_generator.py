@@ -145,16 +145,24 @@ class VideoGenerator:
         """背景クリップを作成"""
         width, height = self.resolution
 
-        # main_img.pngを使用
+        # background.pngを使用（優先）、なければmain_img.png
         project_root = Path(__file__).parent.parent
+        background_img_path = project_root / "background.png"
         main_img_path = project_root / "main_img.png"
 
-        if main_img_path.exists():
-            # main_img.pngを読み込んで下3分の1を透明にする
-            logger.info(f"Using main_img.png as background: {main_img_path}")
+        # background.pngが存在する場合はそれを使用
+        if background_img_path.exists():
+            img_path = background_img_path
+            logger.info(f"Using background.png as background: {img_path}")
+        elif main_img_path.exists():
+            img_path = main_img_path
+            logger.info(f"Using main_img.png as background: {img_path}")
+        else:
+            img_path = None
 
+        if img_path:
             # 画像を読み込んでリサイズ
-            bg_img = Image.open(main_img_path).convert("RGBA")
+            bg_img = Image.open(img_path).convert("RGBA")
             bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
 
             # 下3分の1に透明グラデーションを追加
@@ -486,16 +494,24 @@ class VideoGenerator:
             width = self.thumbnail_config.get("width", 1280)
             height = self.thumbnail_config.get("height", 720)
 
-            # main_img.pngを読み込み
+            # background.pngを使用（優先）、なければmain_img.png
             project_root = Path(__file__).parent.parent
+            background_img_path = project_root / "background.png"
             main_img_path = project_root / "main_img.png"
 
-            if not main_img_path.exists():
-                logger.error(f"main_img.png not found at {main_img_path}")
-                raise FileNotFoundError(f"main_img.png not found at {main_img_path}")
+            # background.pngが存在する場合はそれを使用
+            if background_img_path.exists():
+                img_path = background_img_path
+                logger.info(f"Using background.png for thumbnail: {img_path}")
+            elif main_img_path.exists():
+                img_path = main_img_path
+                logger.info(f"Using main_img.png for thumbnail: {img_path}")
+            else:
+                logger.error(f"No background image found (background.png or main_img.png)")
+                raise FileNotFoundError(f"No background image found at {project_root}")
 
             # 背景画像を読み込んでリサイズ
-            bg_img = Image.open(main_img_path).convert("RGBA")
+            bg_img = Image.open(img_path).convert("RGBA")
             bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
 
             # 下3分の1に透明グラデーションを追加

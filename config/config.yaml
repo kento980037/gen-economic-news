@@ -86,7 +86,7 @@ voice:
     voice: "Kore"  # 30種類の声から選択（AI Studio で試聴可能）
     format: "wav"  # PCM audio (24kHz, mono, 16-bit)
     # 音声スタイルのカスタマイズ用プロンプト（オプション）
-    style_prompt: "落ち着いた、プロフェッショナルなナレーション口調で"
+    # style_prompt: "落ち着いた、プロフェッショナルなナレーション口調で"
 
   # 音量調整
   volume: 1.0

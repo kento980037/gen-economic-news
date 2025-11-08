@@ -126,7 +126,7 @@ class VideoGenerator:
                 audio_codec="aac",
                 temp_audiofile="temp-audio.m4a",
                 remove_temp=True,
-                logger="bar",  # MoviePyのログを有効化（進捗バー表示）
+                logger=None,  # MoviePyのログを抑制
                 preset=preset,
                 ffmpeg_params=["-crf", str(crf), "-threads", str(threads)]
             )

@@ -529,17 +529,39 @@ class VideoGenerator:
             bg_img = Image.open(img_path).convert("RGBA")
             bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
 
-            # 下3分の1に透明グラデーションを追加
-            overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            # 白い部分を選択的に暗くする
+            # 画像を配列に変換
+            bg_array = np.array(bg_img)
+
+            # 各ピクセルの明るさを計算（RGB平均）
+            brightness = np.mean(bg_array[:, :, :3], axis=2)
+
+            # 明るいピクセル（白っぽい部分）にマスクを作成
+            # 閾値より明るい部分だけを暗くする
+            bright_mask = brightness > 120  # 120以上の明るさを対象
+
+            # 明るい部分を暗くする（RGBそれぞれを40%に減光）
+            for c in range(3):  # RGB
+                bg_array[:, :, c] = np.where(
+                    bright_mask,
+                    (bg_array[:, :, c] * 0.4).astype(np.uint8),
+                    bg_array[:, :, c]
+                )
+
+            # 配列を画像に戻す
+            bg_img = Image.fromarray(bg_array, 'RGBA')
+
+            # 全体に暗いオーバーレイを追加（視認性向上のため）
+            overlay = Image.new("RGBA", (width, height), (0, 0, 0, 120))  # 少し弱めに（白部分処理後）
             draw_overlay = ImageDraw.Draw(overlay)
 
-            # グラデーション開始位置（下から3分の1の位置）
-            gradient_start = int(height * 2 / 3)
+            # グラデーション開始位置（下から半分の位置）
+            gradient_start = int(height * 0.5)
 
-            # グラデーションを描画（上から下に向かって透明から黒へ）
+            # 下半分に強めのグラデーションを描画（上から下に向かって透明から黒へ）
             for y in range(gradient_start, height):
-                # 透明度を徐々に上げる（0-230）
-                alpha = int(230 * (y - gradient_start) / (height - gradient_start))
+                # 透明度を徐々に上げる（120-220）
+                alpha = 120 + int(100 * (y - gradient_start) / (height - gradient_start))
                 draw_overlay.rectangle([(0, y), (width, y + 1)], fill=(0, 0, 0, alpha))
 
             # 背景画像とオーバーレイを合成
@@ -550,7 +572,7 @@ class VideoGenerator:
             draw = ImageDraw.Draw(img)
 
             # タイトルを描画
-            font_size = self.thumbnail_config.get("font_size", 60)
+            font_size = self.thumbnail_config.get("font_size", 200)  # 大きく（300→200、ただし折り返しを2行に調整）
             text_color = self._hex_to_rgb(
                 self.thumbnail_config.get("text_color", "#ffffff")
             )
@@ -558,16 +580,16 @@ class VideoGenerator:
             # フォントを読み込み
             font = self._load_japanese_font(font_size)
 
-            # タイトルを複数行に折り返し
-            max_width = width - 100
+            # タイトルを複数行に折り返し（余白をほぼなしに、横幅最大限使用）
+            max_width = width - 40  # 左右20pxずつの余白（最小限）
             lines = self._wrap_text_japanese(title, font, max_width, draw)
 
             # テキスト全体の高さを計算
-            line_height = font_size + 10
+            line_height = font_size + 25  # 行間を広めに
             total_text_height = len(lines) * line_height
 
-            # 下3分の1の中央にテキストを配置
-            text_start_y = gradient_start + (height - gradient_start - total_text_height) // 2
+            # 画面中央に配置（上下中央）
+            text_start_y = (height - total_text_height) // 2
 
             # 各行を描画
             for i, line in enumerate(lines):
@@ -576,16 +598,21 @@ class VideoGenerator:
                 text_x = (width - line_width) // 2
                 text_y = text_start_y + i * line_height
 
-                # 影を追加
-                shadow_offset = 3
-                draw.text(
-                    (text_x + shadow_offset, text_y + shadow_offset),
-                    line,
-                    font=font,
-                    fill=(0, 0, 0),
-                )
+                # より強い影を追加（二重影でコントラスト強化）
+                shadow_offset = 5
+                # 外側の影（より濃く、大きく）
+                for dx, dy in [(shadow_offset, shadow_offset),
+                               (shadow_offset+1, shadow_offset+1),
+                               (shadow_offset-1, shadow_offset),
+                               (shadow_offset, shadow_offset-1)]:
+                    draw.text(
+                        (text_x + dx, text_y + dy),
+                        line,
+                        font=font,
+                        fill=(0, 0, 0),
+                    )
 
-                # テキストを描画
+                # テキストを描画（純白）
                 draw.text((text_x, text_y), line, font=font, fill=text_color)
 
             # 画像を保存

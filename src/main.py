@@ -74,6 +74,9 @@ class VideoGenerationPipeline:
         # コンテキストを初期化
         self.context = VideoGenerationContext(self.config)
 
+        # 関連記事を保存するための属性
+        self.related_articles = []
+
         logger.info("VideoGenerationPipeline initialized")
 
     def run(self, dry_run: bool = False) -> Optional[str]:
@@ -183,6 +186,9 @@ class VideoGenerationPipeline:
         # 金融ニュースの多角的な分析のため、最大3つの関連記事を参照
         related_articles = self.news_fetcher.get_related_articles(news_article, max_related=3)
 
+        # 関連記事をインスタンス変数に保存（メタデータ生成で使用）
+        self.related_articles = related_articles
+
         # 関連記事を参考情報として追加
         additional_context = None
         if related_articles:
@@ -264,8 +270,11 @@ class VideoGenerationPipeline:
 
     def _generate_metadata(self, script_data, news_article):
         """メタデータを生成"""
+        # 関連記事を辞書形式に変換
+        related_articles_dict = [article.to_dict() for article in self.related_articles]
+
         return self.metadata_generator.generate_metadata(
-            script_data, news_article.to_dict()
+            script_data, news_article.to_dict(), related_articles_dict
         )
 
     def _generate_thumbnail(self, metadata):

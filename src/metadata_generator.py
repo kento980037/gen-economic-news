@@ -33,14 +33,15 @@ class MetadataGenerator:
         self.tags_config = config.get("tags", {})
 
     def generate_metadata(
-        self, script_data: Dict, news_article: Dict
+        self, script_data: Dict, news_article: Dict, related_articles: List[Dict] = None
     ) -> Dict:
         """
         台本とニュース記事からメタデータを生成
 
         Args:
             script_data: 台本データ（ScriptGenerator.generate_script()の出力）
-            news_article: ニュース記事データ
+            news_article: メイン記事データ
+            related_articles: 関連記事データのリスト（オプション）
 
         Returns:
             メタデータ辞書
@@ -54,7 +55,7 @@ class MetadataGenerator:
         logger.info("Generating metadata...")
 
         # プロンプトを構築
-        prompt = self._build_prompt(script_data, news_article)
+        prompt = self._build_prompt(script_data, news_article, related_articles or [])
 
         # プロンプトをログに出力
         logger.info("=" * 80)
@@ -95,7 +96,7 @@ class MetadataGenerator:
             logger.error(f"Error generating metadata: {e}")
             raise
 
-    def _build_prompt(self, script_data: Dict, news_article: Dict) -> str:
+    def _build_prompt(self, script_data: Dict, news_article: Dict, related_articles: List[Dict]) -> str:
         """プロンプトを構築"""
         title_max_length = self.title_config.get("max_length", 100)
         title_style = self.title_config.get("style", "clickbait_moderate")
@@ -110,6 +111,33 @@ class MetadataGenerator:
             "clickbait_strong": "強い興味喚起を重視したキャッチーなスタイル",
         }
 
+        # 関連記事情報を構築
+        related_articles_text = ""
+        if related_articles:
+            related_articles_text = "\n【関連記事情報】\n"
+            related_articles_text += f"この動画では、メイン記事に加えて{len(related_articles)}件の関連記事を参照しています。\n\n"
+            for i, article in enumerate(related_articles, 1):
+                related_articles_text += f"{i}. {article.get('title', '')}\n"
+                related_articles_text += f"   ソース: {article.get('source', '')}\n"
+                related_articles_text += f"   URL: {article.get('url', '')}\n\n"
+
+        # 参考記事セクションの例を構築
+        reference_section_example = f"""
+📰 参考記事
+
+【メイン記事】
+{news_article.get('title', '')}
+出典: {news_article.get('source', '')}
+{news_article.get('url', '')}
+"""
+
+        if related_articles:
+            reference_section_example += "\n【関連記事】\n"
+            for i, article in enumerate(related_articles, 1):
+                reference_section_example += f"{i}. {article.get('title', '')}\n"
+                reference_section_example += f"   出典: {article.get('source', '')}\n"
+                reference_section_example += f"   {article.get('url', '')}\n\n"
+
         prompt = f"""以下の経済ニュース解説動画のYouTube用メタデータを作成してください。
 
 【動画情報】
@@ -119,12 +147,12 @@ class MetadataGenerator:
 
 キーワード: {', '.join(script_data.get('keywords', []))}
 
-【元記事情報】
+【メイン記事情報】
 タイトル: {news_article.get('title', '')}
 要約: {news_article.get('summary', '')}
 ソース: {news_article.get('source', '')}
 URL: {news_article.get('url', '')}
-
+{related_articles_text}
 【要件】
 1. タイトル:
    - 最大{title_max_length}文字
@@ -139,7 +167,8 @@ URL: {news_article.get('url', '')}
    - {"ハッシュタグを含める" if include_hashtags else ""}
    - {"チャプター情報を含める（タイムスタンプ付き）" if include_chapters else ""}
    - 視聴者にとっての価値を明確に
-   - **必須**: 説明文の最後に「参考記事」セクションを設け、元記事のタイトルとURLを記載すること
+   - **必須**: 説明文の最後に「参考記事」セクションを設け、メイン記事と全ての関連記事のタイトル、出典、URLを記載すること
+   - 複数の情報源を参照した場合は、それを明示して信頼性をアピールすること
 
 3. タグ:
    - 関連性の高いタグを10-15個
@@ -153,11 +182,7 @@ URL: {news_article.get('url', '')}
 
 ## 説明文
 [YouTube動画説明文]
-
-📰 参考記事
-{news_article.get('title', '')}
-{news_article.get('url', '')}
-
+{reference_section_example}
 ## タグ
 [タグ1, タグ2, タグ3, ...]
 """
@@ -342,11 +367,28 @@ def main():
         "title": "日銀、政策金利を0.5%に引き上げ決定",
         "summary": "日本銀行は金融政策決定会合で、政策金利を0.25%から0.5%に引き上げることを決定した。",
         "source": "経済新聞",
+        "url": "https://example.com/article1"
     }
+
+    # 関連記事のサンプル
+    sample_related_articles = [
+        {
+            "title": "市場関係者、日銀の利上げを歓迎",
+            "summary": "市場関係者は日銀の利上げ決定を歓迎している。",
+            "source": "Bloomberg",
+            "url": "https://example.com/article2"
+        },
+        {
+            "title": "円相場、利上げ発表後に急伸",
+            "summary": "日銀の利上げ発表を受け、円相場が対ドルで急伸した。",
+            "source": "Reuters",
+            "url": "https://example.com/article3"
+        }
+    ]
 
     # メタデータ生成
     generator = MetadataGenerator(config["metadata"])
-    metadata = generator.generate_metadata(sample_script, sample_article)
+    metadata = generator.generate_metadata(sample_script, sample_article, sample_related_articles)
 
     print("\n=== 生成されたメタデータ ===\n")
     print(f"タイトル:\n{metadata['title']}\n")

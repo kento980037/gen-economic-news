@@ -46,6 +46,11 @@ news:
   # ニュースの新しさ（時間単位）
   max_age_hours: 24
 
+  # 記事の品質フィルタリング
+  # 複数トピックが混在している記事を除外する（GPTで判定）
+  # 注意: 各記事でGPT API呼び出しが発生するため、コストとレイテンシが増加
+  filter_multi_topic_articles: true
+
 # 台本生成設定
 script:
   # OpenAI モデル (gpt-4o-mini or gpt-4o)

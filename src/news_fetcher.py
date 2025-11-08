@@ -65,6 +65,7 @@ class NewsFetcher:
         self.max_age_hours = config.get("max_age_hours", 24)
         self.categories = config.get("categories", ["経済", "ビジネス"])
         self.rss_feeds = config.get("rss_feeds", [])
+        self.filter_multi_topic = config.get("filter_multi_topic_articles", True)
 
         # OpenAI クライアント（埋め込みベクトル用）
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -265,6 +266,97 @@ class NewsFetcher:
         )
         return unique_articles
 
+    def _check_single_article_coherence(self, article: NewsArticle) -> bool:
+        """
+        1つの記事内にトピックが一貫しているかチェック
+
+        Args:
+            article: チェックする記事
+
+        Returns:
+            True: トピックが一貫している（単一トピック）
+            False: 複数のトピックが混在している
+        """
+        if not self.openai_client:
+            # OpenAI APIがない場合はチェックできないのでTrueを返す
+            return True
+
+        try:
+            # GPTに記事を分析させ、トピック数を判定
+            prompt = f"""以下のニュース記事を分析してください。
+
+タイトル: {article.title}
+要約: {article.summary[:500]}
+
+【質問】
+この記事は単一の明確なトピックについて書かれていますか？
+それとも、複数の無関係なトピック（例：タリフ問題、医療政策、市政など）が混在していますか？
+
+【回答形式】
+以下のいずれかで答えてください：
+- SINGLE: 単一の明確なトピックのみ
+- MULTIPLE: 複数の無関係なトピックが混在
+
+判断理由も1行で簡潔に説明してください。
+
+回答:"""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "あなたはニュース記事のトピック分析の専門家です。記事が単一トピックか複数トピックかを判定してください。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=150
+            )
+
+            result = response.choices[0].message.content.strip()
+            logger.debug(f"Topic coherence check for '{article.title[:50]}...': {result}")
+
+            # "MULTIPLE"が含まれていれば複数トピック記事と判定
+            if "MULTIPLE" in result.upper():
+                logger.warning(f"Multi-topic article detected: {article.title[:60]}...")
+                logger.warning(f"  Reason: {result}")
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to check article coherence: {e}")
+            # エラー時は安全側に倒してTrueを返す
+            return True
+
+    def _filter_coherent_articles(self, articles: List[NewsArticle]) -> List[NewsArticle]:
+        """
+        複数トピックが混在している記事を除外
+
+        Args:
+            articles: 記事のリスト
+
+        Returns:
+            単一トピックの記事のみのリスト
+        """
+        if not articles:
+            return []
+
+        # フィルタリングが無効な場合はそのまま返す
+        if not self.filter_multi_topic:
+            logger.info("Multi-topic filtering is disabled, skipping coherence check")
+            return articles
+
+        logger.info(f"Filtering articles for topic coherence ({len(articles)} articles)...")
+
+        coherent_articles = []
+        for article in articles:
+            if self._check_single_article_coherence(article):
+                coherent_articles.append(article)
+            else:
+                logger.info(f"Filtered out multi-topic article: {article.title[:60]}...")
+
+        logger.info(f"Coherence filtering: {len(articles)} -> {len(coherent_articles)} articles")
+        return coherent_articles
+
     def select_main_article_by_clustering(self, articles: List[NewsArticle]) -> tuple[NewsArticle, List[NewsArticle]]:
         """
         記事をクラスタリングして、最も多く報道されているトピックのメイン記事と関連記事を選択
@@ -278,20 +370,27 @@ class NewsFetcher:
         if not articles:
             return None, []
 
-        if len(articles) == 1:
-            return articles[0], []
+        # 0. 複数トピックが混在している記事を除外
+        coherent_articles = self._filter_coherent_articles(articles)
 
-        logger.info(f"Clustering {len(articles)} articles to find the most important topic...")
+        if not coherent_articles:
+            logger.warning("No coherent single-topic articles found, using original list")
+            coherent_articles = articles
+
+        if len(coherent_articles) == 1:
+            return coherent_articles[0], []
+
+        logger.info(f"Clustering {len(coherent_articles)} coherent articles to find the most important topic...")
 
         # 1. 全記事の埋め込みベクトルを取得
-        article_texts = [f"{a.title} {a.summary}" for a in articles]
+        article_texts = [f"{a.title} {a.summary}" for a in coherent_articles]
         embeddings = self._get_embeddings_batch(article_texts)
 
         # 埋め込み取得に失敗した場合は最新記事を返す
         valid_embeddings = [e for e in embeddings if e is not None]
         if len(valid_embeddings) < 2:
             logger.warning("Not enough embeddings for clustering, using latest article")
-            return articles[0], []
+            return coherent_articles[0], []
 
         # 2. 類似度マトリクスを計算
         n = len(embeddings)
@@ -307,9 +406,9 @@ class NewsFetcher:
                 similarity_matrix[i][j] = sim
                 similarity_matrix[j][i] = sim
 
-        # 3. 簡易クラスタリング（閾値ベース）
-        # 類似度が0.6以上の記事を同じクラスタとする
-        threshold = 0.6
+        # 3. 改善されたクラスタリング（より厳格な閾値と一貫性チェック）
+        # 類似度が0.75以上の記事を同じクラスタとする（0.6 → 0.75に引き上げ）
+        threshold = 0.75
         clusters = []
         assigned = set()
 
@@ -330,15 +429,51 @@ class NewsFetcher:
 
             clusters.append(cluster)
 
-        # 4. 最大クラスタを選択
-        largest_cluster = max(clusters, key=len)
+        # 4. クラスタの一貫性をチェック（複数トピック混在を防ぐ）
+        valid_clusters = []
+        for cluster in clusters:
+            if len(cluster) == 1:
+                valid_clusters.append(cluster)
+                continue
 
-        logger.info(f"Found {len(clusters)} clusters. Largest cluster has {len(largest_cluster)} articles:")
+            # クラスタ内の全ペア間の平均類似度を計算
+            similarities = []
+            for i in range(len(cluster)):
+                for j in range(i + 1, len(cluster)):
+                    similarities.append(similarity_matrix[cluster[i]][cluster[j]])
+
+            avg_similarity = np.mean(similarities) if similarities else 0
+
+            # 平均類似度が0.70以上なら一貫性のあるクラスタと判断
+            # （個別ペアは0.75以上だが、全体平均は少し緩和）
+            coherence_threshold = 0.70
+            if avg_similarity >= coherence_threshold:
+                valid_clusters.append(cluster)
+                logger.info(f"Coherent cluster found: {len(cluster)} articles, avg similarity: {avg_similarity:.3f}")
+            else:
+                # 一貫性がない場合は分割（最も類似度の高い記事だけ残す）
+                logger.warning(f"Incoherent cluster detected (avg sim: {avg_similarity:.3f}), splitting...")
+                # 各記事を単独クラスタにする
+                for idx in cluster:
+                    valid_clusters.append([idx])
+
+        # 5. 最大の一貫性のあるクラスタを選択
+        # サイズが2以上のクラスタを優先（単独記事は除外）
+        multi_article_clusters = [c for c in valid_clusters if len(c) >= 2]
+
+        if multi_article_clusters:
+            largest_cluster = max(multi_article_clusters, key=len)
+            logger.info(f"Found {len(valid_clusters)} clusters. Selected coherent cluster with {len(largest_cluster)} articles:")
+        else:
+            # 一貫性のあるクラスタがない場合は最新記事を選択
+            logger.warning("No coherent multi-article clusters found, using latest article")
+            return coherent_articles[0], []
+
         for idx in largest_cluster:
-            logger.info(f"  - {articles[idx].source}: {articles[idx].title[:60]}...")
+            logger.info(f"  - {coherent_articles[idx].source}: {coherent_articles[idx].title[:60]}...")
 
-        # 5. クラスタ内で最新の記事をメインに選ぶ
-        cluster_articles = [articles[idx] for idx in largest_cluster]
+        # 6. クラスタ内で最新の記事をメインに選ぶ
+        cluster_articles = [coherent_articles[idx] for idx in largest_cluster]
         cluster_articles.sort(key=lambda a: a.published_at, reverse=True)
 
         main_article = cluster_articles[0]

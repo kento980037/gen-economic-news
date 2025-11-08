@@ -422,6 +422,9 @@ class VoiceGenerator:
                 text = text.strip()
                 if text:
                     merged_sentences.append(text)
+            else:
+                # 空文字列の場合もiを進める（無限ループ防止）
+                i += 1
         logger.info(f"[SUBTITLE] Merged into {len(merged_sentences)} sentences")
 
         if not merged_sentences:

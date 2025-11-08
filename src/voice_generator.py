@@ -384,23 +384,31 @@ class VoiceGenerator:
         Returns:
             台本ベースの字幕セグメント
         """
+        logger.info(f"[SUBTITLE] Starting _create_subtitles_from_script with {len(whisper_segments)} whisper segments")
+
         if not whisper_segments:
+            logger.info("[SUBTITLE] No whisper segments, returning empty")
             return []
 
         # 全体の時間範囲を取得
+        logger.info("[SUBTITLE] Calculating time range...")
         total_start = whisper_segments[0]["start"]
         total_end = whisper_segments[-1]["end"]
         total_duration = total_end - total_start
+        logger.info(f"[SUBTITLE] Time range: {total_start:.2f}s - {total_end:.2f}s (duration: {total_duration:.2f}s)")
 
         if total_duration <= 0:
-            logger.warning("Invalid duration, returning empty")
+            logger.warning("[SUBTITLE] Invalid duration, returning empty")
             return []
 
         # 台本を句読点で分割
+        logger.info(f"[SUBTITLE] Splitting script text ({len(script_text)} chars)...")
         import re
         sentences = re.split(r'([。、])', script_text)
+        logger.info(f"[SUBTITLE] Split into {len(sentences)} parts")
 
         # 句読点を前の文に含める
+        logger.info("[SUBTITLE] Merging punctuation...")
         merged_sentences = []
         i = 0
         while i < len(sentences):
@@ -414,17 +422,19 @@ class VoiceGenerator:
                 text = text.strip()
                 if text:
                     merged_sentences.append(text)
+        logger.info(f"[SUBTITLE] Merged into {len(merged_sentences)} sentences")
 
         if not merged_sentences:
-            logger.warning("No sentences from script, returning original")
+            logger.warning("[SUBTITLE] No sentences from script, returning original")
             return whisper_segments
 
         # 文字数比率で時間を按分
+        logger.info("[SUBTITLE] Calculating timing for each sentence...")
         total_chars = sum(len(s) for s in merged_sentences)
         new_segments = []
         current_time = total_start
 
-        for sentence in merged_sentences:
+        for idx, sentence in enumerate(merged_sentences):
             char_ratio = len(sentence) / total_chars if total_chars > 0 else 0
             duration = total_duration * char_ratio
 
@@ -436,7 +446,10 @@ class VoiceGenerator:
 
             current_time += duration
 
-        logger.info(f"Created {len(new_segments)} subtitle segments from script")
+            if (idx + 1) % 10 == 0:
+                logger.info(f"[SUBTITLE] Processed {idx + 1}/{len(merged_sentences)} sentences")
+
+        logger.info(f"[SUBTITLE] Created {len(new_segments)} subtitle segments from script")
         return new_segments
 
     def _resegment_by_punctuation(self, segments: List[dict]) -> List[dict]:

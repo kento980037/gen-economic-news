@@ -147,18 +147,25 @@ class VideoGenerator:
 
         # background.pngを使用（優先）、なければmain_img.png
         project_root = Path(__file__).parent.parent
-        background_img_path = project_root / "background.png"
-        main_img_path = project_root / "main_img.png"
+        img_dir = project_root / "img"
 
-        # background.pngが存在する場合はそれを使用
-        if background_img_path.exists():
-            img_path = background_img_path
-            logger.info(f"Using background.png as background: {img_path}")
-        elif main_img_path.exists():
-            img_path = main_img_path
-            logger.info(f"Using main_img.png as background: {img_path}")
-        else:
-            img_path = None
+        # 画像の検索パス（優先順位順）
+        image_paths = [
+            img_dir / "background.png",      # 最優先
+            project_root / "background.png",  # ルートにある場合
+            img_dir / "main_img.png",        # フォールバック
+            project_root / "main_img.png",   # ルートのフォールバック
+        ]
+
+        img_path = None
+        for path in image_paths:
+            if path.exists():
+                img_path = path
+                logger.info(f"Using background image: {img_path}")
+                break
+
+        if not img_path:
+            logger.warning(f"No background image found in: {img_dir} or {project_root}")
 
         if img_path:
             # 画像を読み込んでリサイズ
@@ -496,19 +503,26 @@ class VideoGenerator:
 
             # background.pngを使用（優先）、なければmain_img.png
             project_root = Path(__file__).parent.parent
-            background_img_path = project_root / "background.png"
-            main_img_path = project_root / "main_img.png"
+            img_dir = project_root / "img"
 
-            # background.pngが存在する場合はそれを使用
-            if background_img_path.exists():
-                img_path = background_img_path
-                logger.info(f"Using background.png for thumbnail: {img_path}")
-            elif main_img_path.exists():
-                img_path = main_img_path
-                logger.info(f"Using main_img.png for thumbnail: {img_path}")
-            else:
-                logger.error(f"No background image found (background.png or main_img.png)")
-                raise FileNotFoundError(f"No background image found at {project_root}")
+            # 画像の検索パス（優先順位順）
+            image_paths = [
+                img_dir / "background.png",      # 最優先
+                project_root / "background.png",  # ルートにある場合
+                img_dir / "main_img.png",        # フォールバック
+                project_root / "main_img.png",   # ルートのフォールバック
+            ]
+
+            img_path = None
+            for path in image_paths:
+                if path.exists():
+                    img_path = path
+                    logger.info(f"Using background image for thumbnail: {img_path}")
+                    break
+
+            if not img_path:
+                logger.error(f"No background image found in: {img_dir} or {project_root}")
+                raise FileNotFoundError(f"No background image found at {project_root} or {img_dir}")
 
             # 背景画像を読み込んでリサイズ
             bg_img = Image.open(img_path).convert("RGBA")

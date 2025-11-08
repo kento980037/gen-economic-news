@@ -180,7 +180,14 @@ class ScriptGenerator:
 """
 
         if additional_context:
-            prompt += f"\n【追加コンテキスト】\n{additional_context}\n"
+            prompt += f"\n【追加コンテキスト（複数ソース参照）】\n{additional_context}\n"
+            prompt += """
+【複数記事参照時の追加要件】
+- 複数の情報源から得られた情報を統合的に分析してください
+- 各メディアの報道内容の共通点と相違点を考慮してください
+- より多角的で深い分析を提供してください
+- 情報の信頼性を高めるため、複数ソースで確認された事実を優先してください
+"""
 
         prompt += """
 【出力形式】

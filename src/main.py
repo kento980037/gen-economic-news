@@ -179,11 +179,9 @@ class VideoGenerationPipeline:
         """台本を生成（同じトピックの複数ソース参照）"""
         target_duration = self.config.get("app", {}).get("target_duration", 180)
 
-        # 同じトピックに関する関連記事を取得
-        # パフォーマンス最適化: 関連記事機能を無効化（さらに10-20秒短縮）
-        # 必要な場合はコメントを外してmax_relatedを1に設定
-        # related_articles = self.news_fetcher.get_related_articles(news_article, max_related=1)
-        related_articles = []  # 関連記事を使わない
+        # 同じトピックに関する関連記事を取得（複数記事参照を有効化）
+        # 金融ニュースの多角的な分析のため、最大3つの関連記事を参照
+        related_articles = self.news_fetcher.get_related_articles(news_article, max_related=3)
 
         # 関連記事を参考情報として追加
         additional_context = None

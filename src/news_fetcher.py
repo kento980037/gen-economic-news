@@ -169,10 +169,10 @@ class NewsFetcher:
             # NewsAPI エンドポイント
             url = "https://newsapi.org/v2/everything"
 
-            # クエリパラメータ
+            # クエリパラメータ（金融・市場に特化）
             params = {
                 "apiKey": self.news_api_key,
-                "q": "経済 OR ビジネス OR 金融",
+                "q": "金融 OR 株式市場 OR 為替 OR 債券 OR 中央銀行 OR 金融政策 OR 投資",
                 "language": "ja",
                 "sortBy": "publishedAt",
                 "pageSize": self.max_articles * 2,  # 多めに取得してフィルタ
@@ -277,8 +277,11 @@ class NewsFetcher:
 
     def get_related_articles(self, main_article: NewsArticle, max_related: int = 3) -> List[NewsArticle]:
         """
-        メイン記事に関連する記事を取得（同じトピック）
-        埋め込みベクトルを使用して意味的類似度を計算
+        メイン記事に関連する記事を取得（動的検索優先）
+
+        1. NewsAPIで動的に検索（メイン記事のキーワードで検索）
+        2. 既存のキャッシュ記事からも類似記事を探す
+        3. 両方の結果を統合して関連度順にソート
 
         Args:
             main_article: メイン記事
@@ -287,75 +290,82 @@ class NewsFetcher:
         Returns:
             関連記事のリスト
         """
-        # キャッシュされた記事を使用（パフォーマンス最適化）
-        if self._cached_articles is not None:
-            logger.info("Using cached articles for related article search")
-            all_articles = self._cached_articles
-        else:
-            logger.info("No cached articles, fetching fresh articles")
-            all_articles = self.fetch_news()
+        logger.info(f"Finding related articles for: {main_article.title[:50]}...")
 
-        related = []
+        all_candidates = []
+
+        # 1. NewsAPIで動的に検索（最優先）
+        logger.info("Step 1: Dynamic search via NewsAPI")
+        dynamic_articles = self._search_related_articles_dynamic(
+            main_article, max_results=max_related * 2
+        )
 
         # メイン記事のテキストと埋め込みベクトルを取得
         main_text = f"{main_article.title} {main_article.summary}"
         main_embedding = self._get_embedding(main_text)
-
-        # キーワードもフォールバック用に抽出
         main_keywords = self._extract_keywords(main_article.title)
 
-        logger.info(f"Finding related articles for: {main_article.title[:50]}...")
+        # 動的検索結果をスコアリング
+        if dynamic_articles:
+            logger.info(f"Found {len(dynamic_articles)} articles via dynamic search")
 
-        # 埋め込みベクトルをバッチで取得（高速化）
-        if main_embedding is not None:
-            # 全記事のテキストをまとめて準備
-            candidate_articles = [a for a in all_articles
-                                 if a.url != main_article.url and a.title != main_article.title]
+            if main_embedding is not None:
+                # 埋め込みベクトルで類似度を計算
+                article_texts = [f"{a.title} {a.summary}" for a in dynamic_articles]
+                article_embeddings = self._get_embeddings_batch(article_texts)
 
-            # 高速化: 最大5記事に制限してEmbedding APIコールを削減
-            candidate_articles = candidate_articles[:min(5, len(candidate_articles))]
+                for i, article in enumerate(dynamic_articles):
+                    article_embedding = article_embeddings[i] if i < len(article_embeddings) else None
 
-            article_texts = [f"{a.title} {a.summary}" for a in candidate_articles]
+                    if article_embedding is not None:
+                        relevance_score = self._cosine_similarity(main_embedding, article_embedding)
+                        # 動的検索結果には0.1のボーナスを付与（優先度を上げる）
+                        relevance_score += 0.1
+                        all_candidates.append((article, relevance_score, "dynamic"))
+                        logger.debug(f"  [Dynamic] {article.title[:50]}... similarity: {relevance_score:.3f}")
 
-            # バッチで埋め込みベクトルを取得（個別に取得するより高速）
-            article_embeddings = self._get_embeddings_batch(article_texts)
-
-            for i, article in enumerate(candidate_articles):
-                article_embedding = article_embeddings[i] if i < len(article_embeddings) else None
-
-                if article_embedding is not None:
-                    relevance_score = self._cosine_similarity(main_embedding, article_embedding)
-                    logger.debug(f"  - {article.title[:50]}... similarity: {relevance_score:.3f}")
-                else:
-                    # 埋め込み取得失敗時はフォールバック
-                    relevance_score = self._calculate_relevance(main_keywords, article)
-
-                # 閾値を埋め込みベクトル用に調整（通常0.7-0.9が高類似、0.5-0.7が中程度）
-                threshold = 0.5
-
-                if relevance_score > threshold:
-                    related.append((article, relevance_score))
+        # 2. キャッシュされた記事からも検索（補完的）
+        logger.info("Step 2: Searching cached articles")
+        if self._cached_articles is not None:
+            cached_articles = self._cached_articles
         else:
-            # 埋め込みが使えない場合はキーワードベースで検索
-            for article in all_articles:
-                if article.url == main_article.url or article.title == main_article.title:
-                    continue
+            cached_articles = []
 
-                relevance_score = self._calculate_relevance(main_keywords, article)
-                threshold = 0.3
+        if cached_articles and main_embedding is not None:
+            # 既にある記事は除外
+            existing_urls = {main_article.url} | {a.url for a, _, _ in all_candidates}
+            candidate_articles = [
+                a for a in cached_articles
+                if a.url not in existing_urls and a.title != main_article.title
+            ]
 
-                if relevance_score > threshold:
-                    related.append((article, relevance_score))
+            if candidate_articles:
+                # 最大5記事に制限
+                candidate_articles = candidate_articles[:5]
+                article_texts = [f"{a.title} {a.summary}" for a in candidate_articles]
+                article_embeddings = self._get_embeddings_batch(article_texts)
 
-        # スコアでソートして上位を返す
-        related.sort(key=lambda x: x[1], reverse=True)
+                for i, article in enumerate(candidate_articles):
+                    article_embedding = article_embeddings[i] if i < len(article_embeddings) else None
 
-        if related:
-            logger.info(f"Found {len(related)} related articles (showing top {max_related}):")
-            for article, score in related[:max_related]:
-                logger.info(f"  - {article.source}: {article.title[:60]}... (score: {score:.3f})")
+                    if article_embedding is not None:
+                        relevance_score = self._cosine_similarity(main_embedding, article_embedding)
+                        # 閾値チェック（キャッシュ記事は閾値0.5以上のみ）
+                        if relevance_score > 0.5:
+                            all_candidates.append((article, relevance_score, "cached"))
+                            logger.debug(f"  [Cached] {article.title[:50]}... similarity: {relevance_score:.3f}")
 
-        return [article for article, score in related[:max_related]]
+        # 3. スコアでソートして上位を返す
+        all_candidates.sort(key=lambda x: x[1], reverse=True)
+
+        if all_candidates:
+            logger.info(f"Total {len(all_candidates)} related articles found (showing top {max_related}):")
+            for article, score, source in all_candidates[:max_related]:
+                logger.info(f"  [{source.upper()}] {article.source}: {article.title[:50]}... (score: {score:.3f})")
+        else:
+            logger.info("No related articles found")
+
+        return [article for article, _, _ in all_candidates[:max_related]]
 
     def _extract_keywords(self, text: str) -> set:
         """
@@ -533,6 +543,92 @@ class NewsFetcher:
         jaccard = len(common_keywords) / len(main_keywords | article_keywords)
 
         return jaccard
+
+    def _search_related_articles_dynamic(
+        self, main_article: NewsArticle, max_results: int = 5
+    ) -> List[NewsArticle]:
+        """
+        メイン記事に関連する記事をNewsAPIで動的に検索
+
+        Args:
+            main_article: メイン記事
+            max_results: 取得する記事の最大数
+
+        Returns:
+            検索された関連記事のリスト
+        """
+        if not self.news_api_key:
+            logger.info("NEWS_API_KEY not set, skipping dynamic search")
+            return []
+
+        try:
+            # メイン記事からキーワードを抽出
+            main_text = f"{main_article.title} {main_article.summary}"
+            keywords = self._extract_keywords(main_text)
+
+            # キーワードを上位5つに絞る（長すぎるクエリを避ける）
+            # 長い単語（より具体的）を優先
+            sorted_keywords = sorted(keywords, key=len, reverse=True)[:5]
+
+            if not sorted_keywords:
+                logger.warning("No keywords extracted from main article")
+                return []
+
+            # 検索クエリを構築
+            query = " OR ".join(sorted_keywords)
+
+            logger.info(f"Searching NewsAPI with query: {query}")
+
+            # NewsAPI エンドポイント
+            url = "https://newsapi.org/v2/everything"
+
+            # クエリパラメータ
+            params = {
+                "apiKey": self.news_api_key,
+                "q": query,
+                "language": "ja",
+                "sortBy": "relevancy",  # 関連度順にソート
+                "pageSize": max_results * 2,  # 多めに取得してフィルタ
+                "from": (
+                    datetime.now() - timedelta(hours=self.max_age_hours)
+                ).isoformat(),
+            }
+
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("status") != "ok":
+                logger.error(f"NewsAPI error: {data.get('message')}")
+                return []
+
+            articles = []
+            for item in data.get("articles", []):
+                # メイン記事と同じURLはスキップ
+                if item.get("url") == main_article.url:
+                    continue
+
+                # 記事を作成
+                published_at = self._parse_datetime(item.get("publishedAt"))
+                if not published_at:
+                    continue
+
+                article = NewsArticle(
+                    title=item.get("title", ""),
+                    summary=item.get("description", ""),
+                    url=item.get("url", ""),
+                    published_at=published_at,
+                    source=item.get("source", {}).get("name", "NewsAPI"),
+                    content=item.get("content", ""),
+                )
+                articles.append(article)
+
+            logger.info(f"Found {len(articles)} related articles via dynamic search")
+            return articles[:max_results]
+
+        except Exception as e:
+            logger.error(f"Error in dynamic article search: {e}")
+            return []
 
 
 def main():

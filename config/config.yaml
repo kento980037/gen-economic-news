@@ -8,37 +8,39 @@ app:
 
 # ニュース取得設定
 news:
-  # 取得するニュースのカテゴリ
+  # 取得するニュースのカテゴリ（金融・市場に特化）
   categories:
-    - "経済"
-    - "ビジネス"
     - "金融"
     - "株式市場"
     - "為替"
+    - "債券"
+    - "中央銀行"
+    - "金融政策"
+    - "投資"
+    - "市場動向"
 
   # ニュースソース（優先順位順）
   sources:
     - "rss"  # RSSフィード
     - "newsapi"  # NewsAPI
 
-  # RSS Feed URLs（高速化のため最小限に削減）
+  # RSS Feed URLs（金融・市場ニュースに特化）
   rss_feeds:
-    # 高速で安定したフィードのみ使用
+    # 金融・市場関連の主要フィード
     - "https://feeds.bloomberg.com/markets/news.rss"  # Bloomberg Markets
+    - "https://www.cnbc.com/id/100003114/device/rss/rss.html"  # CNBC Top News
+    - "https://www.reuters.com/markets"  # Reuters Markets
     - "https://www3.nhk.or.jp/rss/news/cat6.xml"  # NHK 経済ニュース
-    # 以下はコメントアウト（必要に応じて有効化）
-    # - "https://www.cnbc.com/id/100003114/device/rss/rss.html"  # CNBC Top News
+    # 追加の金融ニュースソース（オプション）
     # - "https://www.ft.com/rss/home"  # Financial Times
     # - "https://www.economist.com/finance-and-economics/rss.xml"  # The Economist
-    # - "https://www.reuters.com/markets"  # Reuters Markets
     # - "https://feeds.feedburner.com/wsj/xml/rss/3_7085.xml"  # WSJ Markets
-    # - "https://news.yahoo.co.jp/rss/topics/business.xml"  # Yahoo!ニュース
 
   # RSS取得タイムアウト（秒）
   rss_timeout: 10
 
   # 取得記事数（複数ソースから集約）
-  max_articles: 5  # 10 → 5に削減
+  max_articles: 10  # 複数記事参照のため増加
 
   # ニュースの新しさ（時間単位）
   max_age_hours: 24
@@ -58,14 +60,16 @@ script:
 
   # プロンプトテンプレート
   system_prompt: |
-    あなたは経済ニュースを分かりやすく解説するプロのナレーターです。
-    視聴者は経済に興味はあるものの、専門知識は限定的な一般層を想定しています。
+    あなたは金融・市場ニュースを分かりやすく解説するプロのナレーターです。
+    視聴者は投資や金融に興味はあるものの、専門知識は限定的な一般投資家層を想定しています。
     以下の点に注意して台本を作成してください：
-    - 専門用語は必要最小限にし、使う場合は簡単に説明する
-    - 具体例や数字を交えて分かりやすく説明する
+    - 金融専門用語は必要最小限にし、使う場合は簡単に説明する
+    - 株価、為替レート、金利などの具体的な数字やデータを交えて分かりやすく説明する
+    - 市場への影響や投資家にとっての意味を明確にする
     - 視聴者の関心を引くような導入から始める
-    - 結論や今後の展望で締めくくる
+    - 今後の市場展望や注目ポイントで締めくくる
     - ナレーション形式で自然な話し言葉を使う
+    - 複数の情報源がある場合は、それらを統合して多角的な分析を提供する
 
 # 音声生成設定
 voice:
@@ -198,11 +202,14 @@ metadata:
   tags:
     max_count: 15
     default_tags:
-      - "経済ニュース"
-      - "ビジネス"
+      - "金融ニュース"
+      - "株式市場"
+      - "為替"
       - "投資"
       - "マーケット"
-      - "金融"
+      - "金融政策"
+      - "市場分析"
+      - "投資家向け"
 
 # 出力設定
 output:

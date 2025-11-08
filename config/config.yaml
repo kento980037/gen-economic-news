@@ -40,7 +40,7 @@ news:
   rss_timeout: 10
 
   # 取得記事数（複数ソースから集約）
-  max_articles: 10  # 複数記事参照のため増加
+  max_articles: 100  # 複数記事参照のため増加
 
   # ニュースの新しさ（時間単位）
   max_age_hours: 24

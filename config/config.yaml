@@ -26,15 +26,16 @@ news:
 
   # RSS Feed URLs（金融・市場ニュースに特化）
   rss_feeds:
-    # 金融・市場関連の主要フィード
+    # 金融・市場関連の主要フィード（金融特化ソースのみ）
     - "https://feeds.bloomberg.com/markets/news.rss"  # Bloomberg Markets
     - "https://www.cnbc.com/id/100003114/device/rss/rss.html"  # CNBC Top News
     - "https://www.reuters.com/markets"  # Reuters Markets
-    - "https://www3.nhk.or.jp/rss/news/cat6.xml"  # NHK 経済ニュース
+    - "https://feeds.feedburner.com/wsj/xml/rss/3_7085.xml"  # WSJ Markets
     # 追加の金融ニュースソース（オプション）
     # - "https://www.ft.com/rss/home"  # Financial Times
     # - "https://www.economist.com/finance-and-economics/rss.xml"  # The Economist
-    # - "https://feeds.feedburner.com/wsj/xml/rss/3_7085.xml"  # WSJ Markets
+    # NHKは経済全般を扱うため金融特化には不向き
+    # - "https://www3.nhk.or.jp/rss/news/cat6.xml"  # NHK 経済ニュース
 
   # RSS取得タイムアウト（秒）
   rss_timeout: 10

@@ -187,11 +187,11 @@ metadata:
   # OpenAI モデル (gpt-4o-mini or gpt-4o)
   openai_model: "gpt-4o-mini"
 
-  # タイトル設定
+  # タイトル設定（金融ニュースポッドキャスト向け最適化）
   title:
-    max_length: 100
+    max_length: 35  # 15〜35文字推奨（スマホ表示最適化）
     include_date: false  # 日付を含めない（ニュースは常に最新のため不要）
-    style: "clickbait_moderate"  # formal, clickbait_moderate, clickbait_strong
+    style: "financial_podcast"  # 金融ポッドキャスト向けクリック率重視
 
   # 説明文設定
   description:

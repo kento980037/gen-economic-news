@@ -52,8 +52,8 @@ script:
   openai_model: "gpt-4o-mini"
 
   # 台本の長さ（文字数）- 高速化のため短縮
-  min_length: 500   # 800 → 500
-  max_length: 1200  # 2000 → 1200 (約60%削減)
+  min_length: 1000   # 800 → 500
+  max_length: 2400  # 2000 → 1200 (約60%削減)
 
   # スタイル設定
   tone: "professional"  # professional, casual, friendly

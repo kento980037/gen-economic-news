@@ -117,6 +117,7 @@ class VideoGenerator:
             threads = encoding_config.get("threads", 0)
 
             logger.info(f"Encoding settings: preset={preset}, crf={crf}, threads={threads}")
+            logger.info(f"Video settings: resolution={self.resolution}, fps={self.fps}")
 
             video.write_videofile(
                 output_path,
@@ -125,7 +126,7 @@ class VideoGenerator:
                 audio_codec="aac",
                 temp_audiofile="temp-audio.m4a",
                 remove_temp=True,
-                logger=None,  # MoviePyのログを抑制
+                logger="bar",  # MoviePyのログを有効化（進捗バー表示）
                 preset=preset,
                 ffmpeg_params=["-crf", str(crf), "-threads", str(threads)]
             )

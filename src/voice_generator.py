@@ -354,13 +354,18 @@ class VoiceGenerator:
                         "text": seg.text.strip()
                     })
 
-            logger.info(f"Transcribed {len(segments)} segments")
+            logger.info(f"Transcribed {len(segments)} Whisper segments")
 
-            # Whisperのタイムスタンプをそのまま使用（最も正確）
-            # 台本からの生成は累積誤差が発生するため使用しない
-            segments = self._resegment_by_punctuation(segments)
-            logger.info(f"Using Whisper timestamps (resegmented by punctuation), final count: {len(segments)}")
+            # 台本が提供されている場合は、台本ベースで字幕を生成（テキストの正確性優先）
+            if script_text:
+                logger.info("Creating subtitles from script with Whisper timestamps")
+                segments = self._create_subtitles_from_script(script_text, segments)
+            else:
+                # 台本がない場合は、Whisperの結果を句読点で再分割
+                logger.info("No script provided, using Whisper text with punctuation-based segmentation")
+                segments = self._resegment_by_punctuation(segments)
 
+            logger.info(f"Final subtitle count: {len(segments)}")
             return segments
 
         except Exception as e:

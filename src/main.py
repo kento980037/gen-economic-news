@@ -163,24 +163,20 @@ class VideoGenerationPipeline:
             raise
 
     def _fetch_news(self):
-        """ニュースを取得（クラスタリングベース）"""
+        """ニュースを取得（話題性スコアベース）"""
         # 全記事を一度だけ取得
         all_articles = self.news_fetcher.fetch_news()
 
         if not all_articles:
             return None
 
-        # クラスタリングで最も報道されているトピックを選択
-        logger.info("Selecting main article using clustering algorithm...")
-        main_article, cluster_related = self.news_fetcher.select_main_article_by_clustering(all_articles)
+        # 話題性スコアで記事を選択
+        logger.info("Selecting main article by trending score (OpenAI evaluation)...")
+        main_article = self.news_fetcher.select_article_by_trending_score(all_articles)
 
         if not main_article:
-            logger.warning("Clustering failed, falling back to latest article")
+            logger.warning("Trending score selection failed, falling back to latest article")
             main_article = all_articles[0]
-            cluster_related = []
-
-        # クラスタ内の関連記事を保存（同じトピックの記事）
-        self.related_articles = cluster_related
 
         # 取得した記事リストをキャッシュ（追加の関連記事検索で再利用）
         self.news_fetcher._cached_articles = all_articles
@@ -188,78 +184,34 @@ class VideoGenerationPipeline:
         return main_article
 
     def _generate_script(self, news_article):
-        """台本を生成（同じトピックの複数ソース参照）"""
+        """台本を生成（OpenAI検索でコンテキスト取得）"""
         target_duration = self.config.get("app", {}).get("target_duration", 180)
 
-        # クラスタリングで既に関連記事が取得されている
-        cluster_related = self.related_articles
+        # OpenAI APIで関連コンテキストを取得
+        logger.info("Fetching related context via OpenAI...")
+        openai_context = self.news_fetcher.get_related_context_openai(news_article)
 
-        # 追加で動的検索も実行（クラスタに含まれない記事も探す）
-        logger.info(f"Already have {len(cluster_related)} articles from clustering")
-
-        # 動的検索で追加の関連記事を探す（最大9記事に拡張）
-        # 過去記事検索の追加により情報ソースが増えたため、上限を引き上げ
-        max_additional = max(0, 9 - len(cluster_related))
-        additional_related = []
-
-        if max_additional > 0:
-            logger.info(f"Searching for up to {max_additional} additional related articles...")
-            additional_related = self.news_fetcher.get_related_articles(
-                news_article, max_related=max_additional
-            )
-
-            # クラスタ記事と重複しないようにフィルタ
-            cluster_urls = {a.url for a in cluster_related}
-            additional_related = [a for a in additional_related if a.url not in cluster_urls]
-            logger.info(f"Found {len(additional_related)} additional related articles")
-
-        # 関連記事を統合（クラスタ記事を優先）
-        related_articles = cluster_related + additional_related
-
-        # 最大9記事に制限（メイン1本 + 関連9本 = 計10本）
-        related_articles = related_articles[:9]
-
-        # 関連記事をインスタンス変数に保存（メタデータ生成で使用）
-        self.related_articles = related_articles
-
-        # 関連記事を参考情報として追加
+        # 関連コンテキストを追加情報として整形
         additional_context = None
-        if related_articles:
-            additional_sources = []
-            additional_sources.append(
-                f"【メイン記事】{news_article.title} (出典: {news_article.source})\n"
-            )
-            for i, article in enumerate(related_articles, 1):
-                # 公開日時を表示（過去記事かどうか判別可能に）
-                pub_date = article.published_at.strftime("%Y年%m月%d日") if hasattr(article, 'published_at') else "日時不明"
-                additional_sources.append(
-                    f"\n【参考記事{i}】\n"
-                    f"公開日: {pub_date}\n"
-                    f"タイトル: {article.title}\n"
-                    f"出典: {article.source}\n"
-                    f"要約: {article.summary[:300]}...\n"
-                    f"URL: {article.url}"
-                )
+        if openai_context:
+            additional_context = f"""
+【OpenAI検索で収集した追加コンテキスト】
 
-            additional_context = (
-                "以下は同じトピックについて複数のメディアが報道した記事と、過去の関連記事（時系列比較用）です。\n"
-                "【重要】これらの情報を総合的に分析して、以下の観点から多角的に解説してください：\n"
-                "1. 複数ソースの共通点・相違点を統合\n"
-                "2. 過去記事との比較で成長・変化のトレンドを分析\n"
-                "3. 時系列での推移を明示（前四半期比、前年同期比など）\n"
-                "4. 過去の類似ケースとの比較で今後の展開を予測\n\n"
-                + "\n".join(additional_sources)
-            )
+以下は、OpenAI APIを使って収集した関連情報です。
+台本作成時に、これらの情報を活用して多角的で深みのある解説を作成してください。
 
-            logger.info(
-                f"Using {len(related_articles) + 1} articles (1 main + {len(related_articles)} related) "
-                f"for script generation on topic: {news_article.title[:50]}..."
-            )
+{openai_context}
+
+【重要な指示】
+1. 上記の背景・文脈を踏まえて、なぜこのニュースが重要かを説明
+2. 過去の類似ケースとの比較で、今後の展開を予測
+3. 市場への影響を具体的に（株価、為替、投資判断など）
+4. 専門家の見解や統計データを引用して説得力を持たせる
+5. 投資家にとって実践的なポイントを明確に
+"""
+            logger.info("Using OpenAI-generated context for script generation")
         else:
-            logger.info(
-                f"No related articles found for: {news_article.title[:50]}... "
-                f"Using single source only"
-            )
+            logger.info("No additional context from OpenAI, using main article only")
 
         return self.script_generator.generate_script(
             news_article.to_dict(),

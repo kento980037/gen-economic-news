@@ -87,6 +87,9 @@ class NewsFetcher:
         # 記事キャッシュ（重複fetch_news()を防ぐ）
         self._cached_articles = None
 
+        # 話題性判定の設定
+        self.use_trending_score = config.get("use_trending_score", False)
+
     def fetch_news(self) -> List[NewsArticle]:
         """
         複数のソースからニュースを取得
@@ -989,6 +992,153 @@ class NewsFetcher:
         except Exception as e:
             logger.error(f"Error in dynamic article search: {e}")
             return []
+
+    def calculate_trending_score(self, article: NewsArticle) -> float:
+        """
+        OpenAI APIを使って記事の話題性スコアを計算
+
+        Args:
+            article: 評価する記事
+
+        Returns:
+            話題性スコア（0.0～10.0）
+        """
+        if not self.openai_client:
+            logger.warning("OpenAI client not initialized, returning default score")
+            return 5.0
+
+        try:
+            prompt = f"""
+以下の金融ニュース記事の「話題性」を0から10のスコアで評価してください。
+
+【評価基準】
+- 市場への影響度（株価、為替、金利への影響）
+- 注目度（投資家が注目しているか）
+- 緊急性・速報性
+- 金融市場での重要性
+- グローバルな影響
+
+【記事情報】
+タイトル: {article.title}
+要約: {article.summary[:300]}
+ソース: {article.source}
+
+数字のみを返してください（例: 7.5）
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "あなたは金融市場の専門家です。記事の話題性を客観的に評価してください。"},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=10,
+                temperature=0.3,
+            )
+
+            score_text = response.choices[0].message.content.strip()
+            score = float(score_text)
+            logger.debug(f"Trending score for '{article.title[:50]}...': {score}")
+            return max(0.0, min(10.0, score))  # 0-10の範囲に制限
+
+        except Exception as e:
+            logger.error(f"Error calculating trending score: {e}")
+            return 5.0  # エラー時はデフォルトスコア
+
+    def select_article_by_trending_score(self, articles: List[NewsArticle]) -> NewsArticle:
+        """
+        話題性スコアで記事を選択
+
+        Args:
+            articles: 記事リスト
+
+        Returns:
+            最も話題性の高い記事
+        """
+        if not articles:
+            return None
+
+        if len(articles) == 1:
+            return articles[0]
+
+        logger.info(f"Calculating trending scores for all {len(articles)} articles...")
+
+        # 全記事の話題性スコアを計算
+        scored_articles = []
+        for idx, article in enumerate(articles, 1):
+            score = self.calculate_trending_score(article)
+            scored_articles.append((article, score))
+            logger.info(f"  [{idx}/{len(articles)}] {score:.1f}/10 - {article.title[:60]}...")
+
+        # スコアでソート（降順）
+        scored_articles.sort(key=lambda x: x[1], reverse=True)
+
+        best_article = scored_articles[0][0]
+        best_score = scored_articles[0][1]
+        logger.info(f"Selected article with highest score ({best_score:.1f}/10): {best_article.title}")
+
+        return best_article
+
+    def get_related_context_openai(self, main_article: NewsArticle) -> str:
+        """
+        OpenAI APIを使って関連コンテキストを取得（検索機能付き）
+
+        Args:
+            main_article: メイン記事
+
+        Returns:
+            関連コンテキスト情報（マークダウン形式）
+        """
+        if not self.openai_client:
+            logger.warning("OpenAI client not initialized")
+            return ""
+
+        try:
+            logger.info(f"Fetching related context via OpenAI for: {main_article.title[:50]}...")
+
+            prompt = f"""
+以下の金融ニュース記事について、投資家向けポッドキャストの台本作成に必要な追加情報を収集してください。
+
+【メイン記事】
+タイトル: {main_article.title}
+要約: {main_article.summary}
+ソース: {main_article.source}
+公開日: {main_article.published_at.strftime('%Y年%m月%d日')}
+
+【収集する情報】
+1. **背景・文脈**: なぜこのニュースが重要なのか、どういう経緯でこうなったか
+2. **過去の類似ケース**: 過去に似た状況があれば、その時どうなったか
+3. **市場への影響**: 株価、為替、金利、投資判断への影響
+4. **専門家の見解**: アナリストや経済学者の意見（あれば）
+5. **関連する統計データ**: 具体的な数字（GDP、失業率、株価指数など）
+6. **今後の見通し**: 予想される展開や注目ポイント
+
+【出力形式】
+マークダウン形式で、見出しごとに整理してください。
+情報源がある場合は明記してください。
+不明な点は無理に書かないでください。
+
+重要: 投資家にとって実践的で、台本作成に役立つ情報を優先してください。
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",  # コスト効率重視（情報収集には十分）
+                messages=[
+                    {"role": "system", "content": "あなたは金融市場の専門家です。正確で実践的な情報を提供してください。"},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=2000,
+                temperature=0.3,
+            )
+
+            context = response.choices[0].message.content
+            logger.info(f"Retrieved {len(context)} characters of context from OpenAI")
+
+            return context
+
+        except Exception as e:
+            logger.error(f"Error fetching context from OpenAI: {e}")
+            return ""
 
 
 def main():

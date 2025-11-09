@@ -201,28 +201,54 @@ URL: {news_article.get('url', '')}
    - 「【緊急】〇〇で相場転換！？知らないと損する影響」
 
 2. サムネイル用タイトル（超重要・クリック率に直結）:
-   - 文字数: **10〜15文字**（サムネイルで読みやすい短さ）
-   - 動画タイトルより短く、インパクト重視
-   - 大きな文字で表示されることを意識
-   - 数字・強めワードを優先
+   **2段構成で出力してください：**
+   - **メインテキスト（大きい文字）**: 5〜8文字（最もインパクトのある言葉）
+   - **サブテキスト（小さい文字）**: 8〜15文字（補足情報）
 
-   **【サムネイル用タイトルの作り方】**
-   ✅ **動画タイトルから核心部分だけを抽出**
+   **【2段構成サムネイルの作り方】**
+   ✅ **メイン（大）+ サブ（小）の組み合わせ例**
+
+   パターン1：数字 + 詳細
    - 動画タイトル：「【速報】NVIDIA株が15%急騰！投資家が知るべき3つの理由」
-   - サムネイル：「NVIDIA急騰」または「15%急騰の真相」
+   - サムネイル：
+     - メイン：「15%急騰」（大きく）
+     - サブ：「NVIDIA株の真相」（小さく）
 
-   ✅ **インパクト重視で短く**
+   パターン2：企業名 + 出来事
    - 動画タイトル：「日銀の金利引き上げで市場激変！今後の展開を5分解説」
-   - サムネイル：「日銀利上げ」または「市場激変」
+   - サムネイル：
+     - メイン：「日銀利上げ」（大きく）
+     - サブ：「市場への影響は？」（小さく）
 
-   ✅ **疑問形も効果的**
+   パターン3：疑問形 + 答え
    - 動画タイトル：「なぜ今テスラが注目？初心者にもわかる市場分析」
-   - サムネイル：「テスラ急騰？」または「なぜ今テスラ？」
+   - サムネイル：
+     - メイン：「テスラ急騰」（大きく）
+     - サブ：「今買うべき？」（小さく）
+
+   パターン4：結論 + 理由
+   - 動画タイトル：「円高が止まらない！FRBの政策転換が原因か」
+   - サムネイル：
+     - メイン：「円高加速」（大きく）
+     - サブ：「FRB政策転換」（小さく）
+
+   **【メインテキストに入れるべき要素】**
+   - 数字（「15%」「3つの理由」「10分」）
+   - 企業名・通貨名（「NVIDIA」「ドル円」「日経平均」）
+   - 強めワード（「急騰」「暴落」「激変」「速報」）
+   - 疑問形（「なぜ？」「本当？」）
+
+   **【サブテキストに入れるべき要素】**
+   - 詳細情報（「市場の反応」「投資家への影響」）
+   - 疑問形（「どうなる？」「買い時？」）
+   - ターゲット（「投資家必見」「初心者向け」）
+   - 期間・タイミング（「2025年」「今週の展開」）
 
    **【NGパターン】**
-   - ❌ 動画タイトルと同じ（長すぎて読めない）
+   - ❌ メインとサブが同じ内容（情報の重複）
+   - ❌ 両方とも長すぎて読めない
    - ❌ 抽象的すぎて何の話か分からない
-   - ❌ 小さい文字では読めないほど長い
+   - ❌ メインが弱くサブが強い（視覚的に逆転）
 
 3. 説明文:
    - 動画の内容を簡潔に説明
@@ -245,8 +271,11 @@ URL: {news_article.get('url', '')}
 ## タイトル
 [YouTube動画タイトル（15-35文字、詳しめ）]
 
-## サムネイル用タイトル
-[サムネイル用の短いタイトル（10-15文字、インパクト重視）]
+## サムネイル_メイン
+[メインテキスト（5-8文字、大きい文字で表示される）]
+
+## サムネイル_サブ
+[サブテキスト（8-15文字、小さい文字で表示される）]
 
 ## 説明文
 [YouTube動画説明文の本文]
@@ -257,8 +286,10 @@ URL: {news_article.get('url', '')}
 [タグ1, タグ2, タグ3, ...]
 
 【重要】
-- 動画タイトルとサムネイル用タイトルは必ず別々に生成してください
-- サムネイル用タイトルは動画タイトルより短く、核心部分のみ抽出してください
+- サムネイルはメインとサブの2つに分けて出力してください
+- メインテキストは最もインパクトのある5-8文字
+- サブテキストは補足情報の8-15文字
+- メインとサブで情報が重複しないようにしてください
 - 説明文セクション内に参考記事情報を必ず含めてください
 - 参考記事は「📰 参考記事」という見出しで記載してください
 - 説明文セクションが終わるまで、他の##見出しを使わないでください
@@ -279,7 +310,8 @@ URL: {news_article.get('url', '')}
         lines = response_text.split("\n")
 
         title = ""
-        thumbnail_title = ""
+        thumbnail_main = ""
+        thumbnail_sub = ""
         description = ""
         tags = []
         current_section = None
@@ -290,8 +322,11 @@ URL: {news_article.get('url', '')}
             if line.startswith("## タイトル") or line.startswith("##タイトル"):
                 current_section = "title"
                 continue
-            elif line.startswith("## サムネイル用タイトル") or line.startswith("##サムネイル用タイトル") or line.startswith("## サムネイル"):
-                current_section = "thumbnail_title"
+            elif line.startswith("## サムネイル_メイン") or line.startswith("##サムネイル_メイン") or line.startswith("## サムネイルメイン"):
+                current_section = "thumbnail_main"
+                continue
+            elif line.startswith("## サムネイル_サブ") or line.startswith("##サムネイル_サブ") or line.startswith("## サムネイルサブ"):
+                current_section = "thumbnail_sub"
                 continue
             elif line.startswith("## 説明文") or line.startswith("##説明文"):
                 current_section = "description"
@@ -313,8 +348,11 @@ URL: {news_article.get('url', '')}
             if current_section == "title":
                 title = line
                 current_section = None
-            elif current_section == "thumbnail_title":
-                thumbnail_title = line
+            elif current_section == "thumbnail_main":
+                thumbnail_main = line
+                current_section = None
+            elif current_section == "thumbnail_sub":
+                thumbnail_sub = line
                 current_section = None
             elif current_section == "description":
                 description += line + "\n"
@@ -323,15 +361,21 @@ URL: {news_article.get('url', '')}
                 tags = [t.strip() for t in line.split(",") if t.strip()]
                 current_section = None
 
-        # サムネイル用タイトルがない場合は動画タイトルから生成
-        if not thumbnail_title and title:
-            # 簡易的に最初の15文字を抽出
-            thumbnail_title = title[:15]
-            logger.warning(f"Thumbnail title not found, using truncated title: {thumbnail_title}")
+        # サムネイル用テキストがない場合は動画タイトルから生成
+        if not thumbnail_main and title:
+            # 簡易的に最初の8文字を抽出
+            thumbnail_main = title[:8]
+            logger.warning(f"Thumbnail main text not found, using truncated title: {thumbnail_main}")
+
+        if not thumbnail_sub and title:
+            # 簡易的に8文字目以降を抽出
+            thumbnail_sub = title[8:20]
+            logger.warning(f"Thumbnail sub text not found, using truncated title: {thumbnail_sub}")
 
         return {
             "title": title.strip(),
-            "thumbnail_title": thumbnail_title.strip(),
+            "thumbnail_main": thumbnail_main.strip(),
+            "thumbnail_sub": thumbnail_sub.strip(),
             "description": description.strip(),
             "tags": tags,
             "generated_at": datetime.now().isoformat(),

@@ -304,11 +304,20 @@ class VideoGenerationPipeline:
         )
 
     def _generate_thumbnail(self, metadata):
-        """サムネイルを生成"""
+        """サムネイルを生成（2段構成）"""
         paths = self.context.get_output_paths()
-        # サムネイル用タイトルを優先、なければ通常タイトル
-        thumbnail_title = metadata.get("thumbnail_title", metadata["title"])
-        return self.video_generator.create_thumbnail(thumbnail_title, paths["thumbnail"])
+        # メインテキストとサブテキストを取得
+        main_text = metadata.get("thumbnail_main", "")
+        sub_text = metadata.get("thumbnail_sub", "")
+
+        # フォールバック：メインテキストがない場合は通常タイトルを使用
+        if not main_text:
+            main_text = metadata["title"][:8]
+            sub_text = metadata["title"][8:20] if len(metadata["title"]) > 8 else ""
+
+        return self.video_generator.create_thumbnail_two_line(
+            main_text, sub_text, paths["thumbnail"]
+        )
 
     def _save_data(self):
         """生成データを保存"""

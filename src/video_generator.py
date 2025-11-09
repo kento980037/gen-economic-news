@@ -625,6 +625,152 @@ class VideoGenerator:
             logger.error(f"Error creating thumbnail: {e}")
             raise
 
+    def create_thumbnail_two_line(self, main_text: str, sub_text: str, output_path: str) -> str:
+        """
+        2段構成のサムネイル画像を生成（メイン大きく + サブ小さく）
+
+        Args:
+            main_text: メインテキスト（5-8文字、大きく表示）
+            sub_text: サブテキスト（8-15文字、小さく表示）
+            output_path: 出力画像ファイルパス
+
+        Returns:
+            生成されたサムネイル画像のパス
+        """
+        logger.info(f"Creating two-line thumbnail: main='{main_text}', sub='{sub_text}'")
+
+        try:
+            # 出力ディレクトリを作成
+            output_dir = Path(output_path).parent
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # サムネイルサイズ
+            width = self.thumbnail_config.get("width", 1280)
+            height = self.thumbnail_config.get("height", 720)
+
+            # background.pngを使用（優先）、なければmain_img.png
+            project_root = Path(__file__).parent.parent
+            img_dir = project_root / "img"
+
+            # 画像の検索パス（優先順位順）
+            image_paths = [
+                img_dir / "background.png",
+                project_root / "background.png",
+                img_dir / "main_img.png",
+                project_root / "main_img.png",
+            ]
+
+            img_path = None
+            for path in image_paths:
+                if path.exists():
+                    img_path = path
+                    logger.info(f"Using background image for thumbnail: {img_path}")
+                    break
+
+            if not img_path:
+                logger.error(f"No background image found in: {img_dir} or {project_root}")
+                raise FileNotFoundError(f"No background image found at {project_root} or {img_dir}")
+
+            # 背景画像を読み込んでリサイズ
+            bg_img = Image.open(img_path).convert("RGBA")
+            bg_img = bg_img.resize((width, height), Image.Resampling.LANCZOS)
+
+            # 白い部分を選択的に暗くする
+            bg_array = np.array(bg_img)
+            brightness = np.mean(bg_array[:, :, :3], axis=2)
+            bright_mask = brightness > 120
+
+            for c in range(3):
+                bg_array[:, :, c] = np.where(
+                    bright_mask,
+                    (bg_array[:, :, c] * 0.4).astype(np.uint8),
+                    bg_array[:, :, c]
+                )
+
+            bg_img = Image.fromarray(bg_array, 'RGBA')
+
+            # 暗いオーバーレイを追加
+            overlay = Image.new("RGBA", (width, height), (0, 0, 0, 120))
+            draw_overlay = ImageDraw.Draw(overlay)
+
+            gradient_start = int(height * 0.5)
+            for y in range(gradient_start, height):
+                alpha = 120 + int(100 * (y - gradient_start) / (height - gradient_start))
+                draw_overlay.rectangle([(0, y), (width, y + 1)], fill=(0, 0, 0, alpha))
+
+            bg_img = Image.alpha_composite(bg_img, overlay)
+            img = bg_img.convert("RGB")
+            draw = ImageDraw.Draw(img)
+
+            text_color = self._hex_to_rgb(self.thumbnail_config.get("text_color", "#ffffff"))
+
+            # メインテキスト（大きい文字）
+            main_font_size = 250  # 超大きく
+            main_font = self._load_japanese_font(main_font_size)
+
+            # サブテキスト（小さい文字）
+            sub_font_size = 80  # メインの約1/3
+            sub_font = self._load_japanese_font(sub_font_size)
+
+            # メインテキストの位置を計算（中央やや上）
+            main_bbox = draw.textbbox((0, 0), main_text, font=main_font)
+            main_width = main_bbox[2] - main_bbox[0]
+            main_height = main_bbox[3] - main_bbox[1]
+
+            # サブテキストの位置を計算
+            sub_bbox = draw.textbbox((0, 0), sub_text, font=sub_font)
+            sub_width = sub_bbox[2] - sub_bbox[0]
+            sub_height = sub_bbox[3] - sub_bbox[1]
+
+            # 全体の高さ（メイン + 間隔 + サブ）
+            spacing = 40  # メインとサブの間隔
+            total_height = main_height + spacing + sub_height
+
+            # 中央に配置
+            start_y = (height - total_height) // 2
+
+            main_x = (width - main_width) // 2
+            main_y = start_y
+
+            sub_x = (width - sub_width) // 2
+            sub_y = start_y + main_height + spacing
+
+            # メインテキストを描画（影付き）
+            shadow_offset = 6
+            for dx, dy in [(shadow_offset, shadow_offset),
+                           (shadow_offset+1, shadow_offset+1),
+                           (shadow_offset-1, shadow_offset),
+                           (shadow_offset, shadow_offset-1)]:
+                draw.text(
+                    (main_x + dx, main_y + dy),
+                    main_text,
+                    font=main_font,
+                    fill=(0, 0, 0),
+                )
+            draw.text((main_x, main_y), main_text, font=main_font, fill=text_color)
+
+            # サブテキストを描画（影付き、メインより薄い影）
+            shadow_offset = 3
+            for dx, dy in [(shadow_offset, shadow_offset),
+                           (shadow_offset-1, shadow_offset)]:
+                draw.text(
+                    (sub_x + dx, sub_y + dy),
+                    sub_text,
+                    font=sub_font,
+                    fill=(0, 0, 0),
+                )
+            draw.text((sub_x, sub_y), sub_text, font=sub_font, fill=text_color)
+
+            # 画像を保存
+            img.save(output_path, quality=95)
+
+            logger.info(f"Two-line thumbnail created: {output_path}")
+            return output_path
+
+        except Exception as e:
+            logger.error(f"Error creating two-line thumbnail: {e}")
+            raise
+
     def _create_text_image(
         self,
         text: str,

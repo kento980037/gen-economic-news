@@ -306,7 +306,9 @@ class VideoGenerationPipeline:
     def _generate_thumbnail(self, metadata):
         """サムネイルを生成"""
         paths = self.context.get_output_paths()
-        return self.video_generator.create_thumbnail(metadata["title"], paths["thumbnail"])
+        # サムネイル用タイトルを優先、なければ通常タイトル
+        thumbnail_title = metadata.get("thumbnail_title", metadata["title"])
+        return self.video_generator.create_thumbnail(thumbnail_title, paths["thumbnail"])
 
     def _save_data(self):
         """生成データを保存"""

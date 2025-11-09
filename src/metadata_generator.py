@@ -155,10 +155,11 @@ class MetadataGenerator:
 URL: {news_article.get('url', '')}
 {related_articles_text}
 【要件】
-1. タイトル（金融ニュースポッドキャスト向け・超重要）:
+1. 動画タイトル（金融ニュースポッドキャスト向け・超重要）:
    - 文字数: 15〜35文字（スマホで一瞬で伝わる長さ）
    - スタイル: {style_instructions.get(title_style, '')}
    - {"日付を含める" if include_date else "日付は含めない"}
+   - SEO・検索を意識した詳しめのタイトル
 
    **【YouTubeクリック率を最大化する必須テクニック】**
    以下の要素を必ず組み合わせること：
@@ -199,7 +200,31 @@ URL: {news_article.get('url', '')}
    - 「なぜ今〇〇が注目？初心者にもわかる市場分析」
    - 「【緊急】〇〇で相場転換！？知らないと損する影響」
 
-2. 説明文:
+2. サムネイル用タイトル（超重要・クリック率に直結）:
+   - 文字数: **10〜15文字**（サムネイルで読みやすい短さ）
+   - 動画タイトルより短く、インパクト重視
+   - 大きな文字で表示されることを意識
+   - 数字・強めワードを優先
+
+   **【サムネイル用タイトルの作り方】**
+   ✅ **動画タイトルから核心部分だけを抽出**
+   - 動画タイトル：「【速報】NVIDIA株が15%急騰！投資家が知るべき3つの理由」
+   - サムネイル：「NVIDIA急騰」または「15%急騰の真相」
+
+   ✅ **インパクト重視で短く**
+   - 動画タイトル：「日銀の金利引き上げで市場激変！今後の展開を5分解説」
+   - サムネイル：「日銀利上げ」または「市場激変」
+
+   ✅ **疑問形も効果的**
+   - 動画タイトル：「なぜ今テスラが注目？初心者にもわかる市場分析」
+   - サムネイル：「テスラ急騰？」または「なぜ今テスラ？」
+
+   **【NGパターン】**
+   - ❌ 動画タイトルと同じ（長すぎて読めない）
+   - ❌ 抽象的すぎて何の話か分からない
+   - ❌ 小さい文字では読めないほど長い
+
+3. 説明文:
    - 動画の内容を簡潔に説明
    - 重要なポイントを箇条書きで
    - {"ハッシュタグを含める" if include_hashtags else ""}
@@ -210,7 +235,7 @@ URL: {news_article.get('url', '')}
    - 複数の情報源を参照した場合は、それを明示して信頼性をアピールすること
    - 説明文は1つのセクションとして完結させ、途中で##見出しを使わないこと
 
-3. タグ:
+4. タグ:
    - 関連性の高いタグを10-15個
    - 一般的なタグと具体的なタグのバランス
 
@@ -218,7 +243,10 @@ URL: {news_article.get('url', '')}
 以下の形式で厳密に出力してください:
 
 ## タイトル
-[YouTube動画タイトル]
+[YouTube動画タイトル（15-35文字、詳しめ）]
+
+## サムネイル用タイトル
+[サムネイル用の短いタイトル（10-15文字、インパクト重視）]
 
 ## 説明文
 [YouTube動画説明文の本文]
@@ -229,6 +257,8 @@ URL: {news_article.get('url', '')}
 [タグ1, タグ2, タグ3, ...]
 
 【重要】
+- 動画タイトルとサムネイル用タイトルは必ず別々に生成してください
+- サムネイル用タイトルは動画タイトルより短く、核心部分のみ抽出してください
 - 説明文セクション内に参考記事情報を必ず含めてください
 - 参考記事は「📰 参考記事」という見出しで記載してください
 - 説明文セクションが終わるまで、他の##見出しを使わないでください
@@ -249,6 +279,7 @@ URL: {news_article.get('url', '')}
         lines = response_text.split("\n")
 
         title = ""
+        thumbnail_title = ""
         description = ""
         tags = []
         current_section = None
@@ -258,6 +289,9 @@ URL: {news_article.get('url', '')}
 
             if line.startswith("## タイトル") or line.startswith("##タイトル"):
                 current_section = "title"
+                continue
+            elif line.startswith("## サムネイル用タイトル") or line.startswith("##サムネイル用タイトル") or line.startswith("## サムネイル"):
+                current_section = "thumbnail_title"
                 continue
             elif line.startswith("## 説明文") or line.startswith("##説明文"):
                 current_section = "description"
@@ -279,6 +313,9 @@ URL: {news_article.get('url', '')}
             if current_section == "title":
                 title = line
                 current_section = None
+            elif current_section == "thumbnail_title":
+                thumbnail_title = line
+                current_section = None
             elif current_section == "description":
                 description += line + "\n"
             elif current_section == "tags":
@@ -286,8 +323,15 @@ URL: {news_article.get('url', '')}
                 tags = [t.strip() for t in line.split(",") if t.strip()]
                 current_section = None
 
+        # サムネイル用タイトルがない場合は動画タイトルから生成
+        if not thumbnail_title and title:
+            # 簡易的に最初の15文字を抽出
+            thumbnail_title = title[:15]
+            logger.warning(f"Thumbnail title not found, using truncated title: {thumbnail_title}")
+
         return {
             "title": title.strip(),
+            "thumbnail_title": thumbnail_title.strip(),
             "description": description.strip(),
             "tags": tags,
             "generated_at": datetime.now().isoformat(),

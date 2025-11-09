@@ -429,19 +429,45 @@ Whisperの各セグメントに対応する台本の部分を特定し、JSON形
 }}
 
 【重要なルール】
-1. 各セグメントのstart/endタイミングは絶対に変更しない
-2. textのみを台本から抽出して置き換える
-3. Whisperのセグメント数と同じ数のセグメントを出力する（必須）
-4. 台本の順序を保ち、Whisperのタイミングに合わせて配分する
-5. 句読点も台本通りに含める
-6. Whisperのセグメントが長い場合でも、そのセグメントに対応する台本部分全体を1つのセグメントとして出力する
-7. 字幕として読みやすいように、句点（。）で区切られた文単位でテキストを配置する
-8. 各Whisperセグメントの時間範囲内に、複数の文が含まれる場合も、それらをまとめて1つのセグメントとする
+1. 各セグメントのstart時間は変更しない
+2. endタイミングは、テキスト量に応じて適切に調整する（テキストが長い場合は次のセグメントの直前まで延長可能）
+3. textのみを台本から抽出して置き換える
+4. Whisperのセグメント数と同じ数のセグメントを出力する（必須）
+5. 台本の順序を保ち、Whisperのタイミングに合わせて配分する
+6. 句読点も台本通りに含める
+7. Whisperのセグメントが長い場合でも、そのセグメントに対応する台本部分全体を1つのセグメントとして出力する
+8. 字幕として読みやすいように、句点（。）で区切られた文単位でテキストを配置する
+9. 各Whisperセグメントの時間範囲内に、複数の文が含まれる場合も、それらをまとめて1つのセグメントとする
+10. 【重要】Whisperのendタイミングが明らかに短すぎる場合（テキスト量に対して）、次のセグメントの開始時間の直前まで延長する
 
-【例】
-Whisperセグメント: 0-10秒「きょうわけいざいにゅーすですにちぎんがはっぴょうしました」
-台本: 「今日は経済ニュースです。日銀が発表しました。」
+【タイミング延長の判断基準】
+- 日本語の平均読み上げ速度は約300文字/分 = 5文字/秒
+- セグメント時間内に表示する文字数の目安：duration(秒) × 5文字
+- 例：3秒のセグメントなら15文字程度が適切
+- 台本テキストが30文字以上なのにdurationが3秒未満の場合 → 延長が必要
+- 延長する場合は、次のセグメントの開始時間の0.1秒前まで延長する
+
+【例1：正常な場合】
+Whisperセグメント: 0-10秒「きょうわけいざいにゅーすですにちぎんがはっぴょうしました」（duration: 10秒）
+台本: 「今日は経済ニュースです。日銀が発表しました。」（26文字）
+→ 10秒 × 5文字/秒 = 50文字 > 26文字 → 延長不要
 → 出力: {{"index": 0, "text": "今日は経済ニュースです。日銀が発表しました。", "start": 0.0, "end": 10.0}}
+
+【例2：endタイミングが短すぎる場合】
+Whisperセグメント0: 0-3秒「こんにちは」（duration: 3秒、次のセグメント開始: 6.0秒）
+台本: 「こんにちは。今日は経済ニュースをお伝えします。」（25文字）
+→ 3秒 × 5文字/秒 = 15文字 < 25文字 → 延長が必要
+→ 必要なduration: 25文字 ÷ 5文字/秒 = 5秒
+→ 次のセグメントは6.0秒から開始なので、5.9秒まで延長可能
+→ 出力: {{"index": 0, "text": "こんにちは。今日は経済ニュースをお伝えします。", "start": 0.0, "end": 5.9}}
+
+【例3：複数文がある場合】
+Whisperセグメント0: 0-4秒「にほんぎんこうがせいさくきんりをひきあげ」（duration: 4秒、次: 8.0秒）
+台本: 「日本銀行が政策金利を引き上げました。これは2007年以来の利上げとなります。」（42文字）
+→ 4秒 × 5文字/秒 = 20文字 < 42文字 → 延長が必要
+→ 必要なduration: 42文字 ÷ 5文字/秒 = 8.4秒
+→ 次のセグメントは8.0秒から開始なので、7.9秒まで延長
+→ 出力: {{"index": 0, "text": "日本銀行が政策金利を引き上げました。これは2007年以来の利上げとなります。", "start": 0.0, "end": 7.9}}
 """
 
             response = openai_client.chat.completions.create(
@@ -469,13 +495,38 @@ Whisperセグメント: 0-10秒「きょうわけいざいにゅーすですに�
                 original_text = whisper_segments[i]["text"]
                 corrected_text = corrected["text"]
 
+                original_start = whisper_segments[i]["start"]
+                original_end = whisper_segments[i]["end"]
+                corrected_start = corrected["start"]
+                corrected_end = corrected["end"]
+
+                duration = corrected_end - corrected_start
+                original_duration = original_end - original_start
+
+                # 次のセグメントの開始時間を取得（タイミング延長の判定用）
+                next_start = whisper_segments[i + 1]["start"] if i + 1 < len(whisper_segments) else None
+
                 # 補正内容をログ出力（変更があった場合のみ）
                 if original_text != corrected_text:
                     logger.info(f"[AI CORRECTION] Segment {i}: '{original_text}' -> '{corrected_text}'")
 
+                # タイミング情報を詳細にログ出力（特に前半10個）
+                if i < 10:
+                    timing_extended = corrected_end > original_end
+                    timing_info = f"[TIMING] Segment {i}:"
+                    timing_info += f"\n  Original: {original_start:.2f}s - {original_end:.2f}s (duration: {original_duration:.2f}s)"
+                    timing_info += f"\n  Corrected: {corrected_start:.2f}s - {corrected_end:.2f}s (duration: {duration:.2f}s)"
+                    if next_start:
+                        timing_info += f"\n  Next segment starts at: {next_start:.2f}s"
+                    if timing_extended:
+                        extension = corrected_end - original_end
+                        timing_info += f"\n  ⚠️ EXTENDED by {extension:.2f}s"
+                    timing_info += f"\n  Text ({len(corrected_text)} chars): '{corrected_text[:50]}...'"
+                    logger.info(timing_info)
+
                 final_segments.append({
-                    "start": corrected["start"],
-                    "end": corrected["end"],
+                    "start": corrected_start,
+                    "end": corrected_end,
                     "text": corrected_text
                 })
 

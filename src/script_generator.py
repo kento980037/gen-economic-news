@@ -154,12 +154,17 @@ class ScriptGenerator:
         self, news_article: Dict, target_chars: int, additional_context: Optional[str]
     ) -> str:
         """単一記事用のプロンプトを構築"""
+
+        # 本文を優先、なければ要約を使用
+        article_content = news_article.get('content', '')
+        if not article_content or len(article_content.strip()) < 50:
+            article_content = news_article.get('summary', '')
+
         prompt = f"""以下の金融ニュース記事を元に、YouTube金融ポッドキャスト用の台本を作成してください。
 
-【記事情報】
+【メイン記事】
 タイトル: {news_article.get('title', '')}
-要約: {news_article.get('summary', '')}
-本文: {news_article.get('content', news_article.get('summary', ''))}
+本文: {article_content}
 ソース: {news_article.get('source', '')}
 公開日時: {news_article.get('published_at', '')}
 

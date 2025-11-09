@@ -211,11 +211,18 @@ class VideoGenerationPipeline:
                 context_parts.append(f"**タイトル**: {article.title}")
                 context_parts.append(f"**ソース**: {article.source}")
                 context_parts.append(f"**公開日**: {article.published_at.strftime('%Y年%m月%d日')}")
-                context_parts.append(f"**要約**: {article.summary}")
 
-                # contentフィールドがあれば本文も追加（より詳しい情報）
-                if article.content and len(article.content) > len(article.summary):
-                    context_parts.append(f"**本文**: {article.content[:1000]}...")
+                # 本文を優先、なければ要約を使用
+                # 本文が長い場合は最大3000文字まで（具体的な情報を多く含めるため）
+                if article.content and len(article.content.strip()) > 50:
+                    # 本文がある場合は本文を使用（最大3000文字）
+                    content_text = article.content[:3000]
+                    if len(article.content) > 3000:
+                        content_text += "..."
+                    context_parts.append(f"**本文**: {content_text}")
+                else:
+                    # 本文がない場合のみ要約を使用
+                    context_parts.append(f"**要約**: {article.summary}")
 
                 context_parts.append("")  # 空行
 

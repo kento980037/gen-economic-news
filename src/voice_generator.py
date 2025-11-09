@@ -356,10 +356,10 @@ class VoiceGenerator:
 
             logger.info(f"Transcribed {len(segments)} Whisper segments")
 
-            # 台本が提供されている場合は、台本ベースで字幕を生成（テキストの正確性優先）
+            # 台本が提供されている場合は、OpenAI APIで書き起こしを台本で補正
             if script_text:
-                logger.info("Creating subtitles from script with Whisper timestamps")
-                segments = self._create_subtitles_from_script(script_text, segments)
+                logger.info("Correcting Whisper transcription with script using OpenAI API")
+                segments = self._correct_whisper_with_script_ai(segments, script_text)
             else:
                 # 台本がない場合は、Whisperの結果を句読点で再分割
                 logger.info("No script provided, using Whisper text with punctuation-based segmentation")
@@ -371,6 +371,108 @@ class VoiceGenerator:
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
             raise
+
+    def _correct_whisper_with_script_ai(self, whisper_segments: List[dict], script_text: str) -> List[dict]:
+        """
+        OpenAI APIを使ってWhisperの書き起こしを台本で補正
+        各セグメントのタイミングは保持し、テキストのみを台本に合わせる
+
+        Args:
+            whisper_segments: Whisperの書き起こしセグメント
+            script_text: 台本テキスト
+
+        Returns:
+            補正された字幕セグメント
+        """
+        logger.info(f"[AI CORRECTION] Correcting {len(whisper_segments)} segments with script")
+
+        # OpenAIクライアントを取得
+        if self.provider == "gemini":
+            # Gemini使用時もOpenAIクライアントを初期化
+            openai_key = os.getenv("OPENAI_API_KEY")
+            if not openai_key:
+                logger.warning("OPENAI_API_KEY not found, skipping AI correction")
+                return self._resegment_by_punctuation(whisper_segments)
+            openai_client = OpenAI(api_key=openai_key)
+        else:
+            openai_client = self.client
+
+        # Whisperの書き起こし全文を作成
+        whisper_text = " ".join([seg["text"] for seg in whisper_segments])
+
+        # OpenAI APIで台本とWhisperテキストをマッピング
+        try:
+            prompt = f"""あなたは字幕編集のプロフェッショナルです。
+
+以下の「台本」と「Whisperによる書き起こし」を比較して、各Whisperセグメントに対応する台本テキストを特定してください。
+
+【台本（正確なテキスト）】
+{script_text}
+
+【Whisperによる書き起こし（タイミングは正確だがテキストに誤認識がある可能性）】
+{whisper_text}
+
+【タスク】
+Whisperの各セグメントに対応する台本の部分を特定し、JSON形式で出力してください。
+各セグメントのタイミングは維持しつつ、テキストを台本通りに補正します。
+
+【Whisperセグメント】
+{[{"index": i, "text": seg["text"], "start": seg["start"], "end": seg["end"]} for i, seg in enumerate(whisper_segments)]}
+
+【出力形式】
+以下のJSON形式で出力してください（他のテキストは一切含めないでください）:
+{{
+  "corrected_segments": [
+    {{"index": 0, "text": "台本から抽出した対応テキスト", "start": 0.0, "end": 2.5}},
+    {{"index": 1, "text": "台本から抽出した対応テキスト", "start": 2.5, "end": 5.0}}
+  ]
+}}
+
+【重要なルール】
+1. 各セグメントのstart/endタイミングは絶対に変更しない
+2. textのみを台本から抽出して置き換える
+3. Whisperのセグメント数と同じ数のセグメントを出力する
+4. 台本の順序を保ち、Whisperのタイミングに合わせて配分する
+5. 句読点も台本通りに含める
+"""
+
+            response = openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "あなたは字幕編集のプロフェッショナルです。JSON形式で正確に出力してください。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                response_format={"type": "json_object"}
+            )
+
+            import json
+            result = json.loads(response.choices[0].message.content)
+            corrected_segments = result.get("corrected_segments", [])
+
+            if len(corrected_segments) != len(whisper_segments):
+                logger.warning(f"Segment count mismatch: expected {len(whisper_segments)}, got {len(corrected_segments)}")
+                # フォールバック
+                return self._resegment_by_punctuation(whisper_segments)
+
+            # 補正されたセグメントを返す
+            final_segments = []
+            for corrected in corrected_segments:
+                final_segments.append({
+                    "start": corrected["start"],
+                    "end": corrected["end"],
+                    "text": corrected["text"]
+                })
+
+            logger.info(f"[AI CORRECTION] Successfully corrected {len(final_segments)} segments")
+
+            # 句読点で再分割して細かく
+            return self._resegment_by_punctuation(final_segments)
+
+        except Exception as e:
+            logger.error(f"[AI CORRECTION] Failed: {e}")
+            # エラー時はフォールバック
+            return self._resegment_by_punctuation(whisper_segments)
 
     def _create_subtitles_from_script(self, script_text: str, whisper_segments: List[dict]) -> List[dict]:
         """

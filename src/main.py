@@ -197,8 +197,9 @@ class VideoGenerationPipeline:
         # 追加で動的検索も実行（クラスタに含まれない記事も探す）
         logger.info(f"Already have {len(cluster_related)} articles from clustering")
 
-        # 動的検索で追加の関連記事を探す（最大3記事）
-        max_additional = max(0, 3 - len(cluster_related))
+        # 動的検索で追加の関連記事を探す（最大9記事に拡張）
+        # 過去記事検索の追加により情報ソースが増えたため、上限を引き上げ
+        max_additional = max(0, 9 - len(cluster_related))
         additional_related = []
 
         if max_additional > 0:
@@ -215,8 +216,8 @@ class VideoGenerationPipeline:
         # 関連記事を統合（クラスタ記事を優先）
         related_articles = cluster_related + additional_related
 
-        # 最大3記事に制限
-        related_articles = related_articles[:3]
+        # 最大9記事に制限（メイン1本 + 関連9本 = 計10本）
+        related_articles = related_articles[:9]
 
         # 関連記事をインスタンス変数に保存（メタデータ生成で使用）
         self.related_articles = related_articles
@@ -229,8 +230,11 @@ class VideoGenerationPipeline:
                 f"【メイン記事】{news_article.title} (出典: {news_article.source})\n"
             )
             for i, article in enumerate(related_articles, 1):
+                # 公開日時を表示（過去記事かどうか判別可能に）
+                pub_date = article.published_at.strftime("%Y年%m月%d日") if hasattr(article, 'published_at') else "日時不明"
                 additional_sources.append(
                     f"\n【参考記事{i}】\n"
+                    f"公開日: {pub_date}\n"
                     f"タイトル: {article.title}\n"
                     f"出典: {article.source}\n"
                     f"要約: {article.summary[:300]}...\n"
@@ -238,8 +242,12 @@ class VideoGenerationPipeline:
                 )
 
             additional_context = (
-                "以下は同じトピックについて複数のメディアが報道した記事です。\n"
-                "これらの情報を総合的に分析して、多角的な視点から解説してください。\n\n"
+                "以下は同じトピックについて複数のメディアが報道した記事と、過去の関連記事（時系列比較用）です。\n"
+                "【重要】これらの情報を総合的に分析して、以下の観点から多角的に解説してください：\n"
+                "1. 複数ソースの共通点・相違点を統合\n"
+                "2. 過去記事との比較で成長・変化のトレンドを分析\n"
+                "3. 時系列での推移を明示（前四半期比、前年同期比など）\n"
+                "4. 過去の類似ケースとの比較で今後の展開を予測\n\n"
                 + "\n".join(additional_sources)
             )
 

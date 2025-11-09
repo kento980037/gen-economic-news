@@ -58,6 +58,20 @@ news:
   # 注意: 各記事でGPT API呼び出しが発生するため、コストとレイテンシが増加
   filter_multi_topic_articles: true
 
+  # コンテキスト情報の拡張（第2フェーズ：情報の厚みを作る）
+  # 台本生成に使用する記事数：最大10本（メイン1本 + 関連9本）
+  context_enhancement:
+    # 過去の関連記事を検索（時系列比較用）
+    # 決算記事なら前四半期・前年同期、政策変更なら過去の同様の政策
+    # これにより「前四半期比18%増」などの時系列比較が可能に
+    search_historical: true
+    historical_range_days: 90  # 過去90日前までの記事を検索対象
+    historical_min_age_days: 30  # 最低30日以上前の記事（最近の記事と重複を避ける）
+    historical_max_results: 4  # 過去記事の最大取得数
+
+    # Web検索で追加コンテキスト（将来実装予定）
+    search_web: false  # 企業IR、公式発表、アナリストレポートなど
+
 # 台本生成設定
 script:
   # OpenAI モデル (gpt-4o-mini or gpt-4o)

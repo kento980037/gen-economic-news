@@ -67,6 +67,12 @@ class NewsFetcher:
         self.rss_feeds = config.get("rss_feeds", [])
         self.filter_multi_topic = config.get("filter_multi_topic_articles", True)
 
+        # コンテキスト情報拡張の設定
+        context_config = config.get("context_enhancement", {})
+        self.search_historical = context_config.get("search_historical", True)
+        self.historical_range_days = context_config.get("historical_range_days", 90)
+        self.historical_min_age_days = context_config.get("historical_min_age_days", 30)
+
         # OpenAI クライアント（埋め込みベクトル用）
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         if self.openai_api_key:
@@ -496,11 +502,13 @@ class NewsFetcher:
 
     def get_related_articles(self, main_article: NewsArticle, max_related: int = 3) -> List[NewsArticle]:
         """
-        メイン記事に関連する記事を取得（動的検索優先）
+        メイン記事に関連する記事・コンテキスト情報を取得（情報の厚みを作る）
 
+        【目的】台本作成の情報を充実させる
         1. NewsAPIで動的に検索（メイン記事のキーワードで検索）
         2. 既存のキャッシュ記事からも類似記事を探す
-        3. 両方の結果を統合して関連度順にソート
+        3. 過去の関連記事を検索（時系列比較用）
+        4. Web検索で追加コンテキスト取得（ニュース以外も含む）
 
         Args:
             main_article: メイン記事
@@ -559,8 +567,8 @@ class NewsFetcher:
             ]
 
             if candidate_articles:
-                # 最大5記事に制限
-                candidate_articles = candidate_articles[:5]
+                # 最大10記事に制限（情報ソース拡張）
+                candidate_articles = candidate_articles[:10]
                 article_texts = [f"{a.title} {a.summary}" for a in candidate_articles]
                 article_embeddings = self._get_embeddings_batch(article_texts)
 
@@ -574,7 +582,30 @@ class NewsFetcher:
                             all_candidates.append((article, relevance_score, "cached"))
                             logger.debug(f"  [Cached] {article.title[:50]}... similarity: {relevance_score:.3f}")
 
-        # 3. スコアでソートして上位を返す
+        # 3. 過去の関連記事を検索（時系列比較用）
+        logger.info("Step 3: Searching historical articles for context")
+        historical_articles = self._search_historical_context(main_article, max_results=4)
+
+        if historical_articles and main_embedding is not None:
+            article_texts = [f"{a.title} {a.summary}" for a in historical_articles]
+            article_embeddings = self._get_embeddings_batch(article_texts)
+
+            for i, article in enumerate(historical_articles):
+                article_embedding = article_embeddings[i] if i < len(article_embeddings) else None
+
+                if article_embedding is not None:
+                    relevance_score = self._cosine_similarity(main_embedding, article_embedding)
+                    # 過去記事には0.05のボーナス（情報の厚み重視）
+                    relevance_score += 0.05
+                    all_candidates.append((article, relevance_score, "historical"))
+                    logger.debug(f"  [Historical] {article.title[:50]}... similarity: {relevance_score:.3f}")
+
+        # 4. Web検索（将来実装）
+        # logger.info("Step 4: Searching web for additional context")
+        # web_articles = self._search_web_context(main_article, max_results=1)
+        # （省略）
+
+        # 5. スコアでソートして上位を返す
         all_candidates.sort(key=lambda x: x[1], reverse=True)
 
         if all_candidates:
@@ -585,6 +616,116 @@ class NewsFetcher:
             logger.info("No related articles found")
 
         return [article for article, _, _ in all_candidates[:max_related]]
+
+    def _search_historical_context(self, main_article: NewsArticle, max_results: int = 2) -> List[NewsArticle]:
+        """
+        過去の関連記事を検索（時系列比較用）
+
+        【検索戦略】
+        - 決算記事 → 前四半期・前年同期の決算
+        - 政策変更 → 過去の同様の政策
+        - 市場変動 → 過去の類似パターン
+
+        Args:
+            main_article: メイン記事
+            max_results: 取得する最大数
+
+        Returns:
+            過去の関連記事リスト
+        """
+        # 設定で無効化されている場合はスキップ
+        if not self.search_historical:
+            logger.info("Historical search is disabled in config")
+            return []
+
+        if not self.news_api_key:
+            logger.info("NEWS_API_KEY not set, skipping historical search")
+            return []
+
+        try:
+            # キーワード抽出
+            keywords = self._extract_keywords(main_article.title)
+            sorted_keywords = sorted(keywords, key=len, reverse=True)[:3]
+
+            if not sorted_keywords:
+                return []
+
+            query = " AND ".join(sorted_keywords)
+
+            # 設定から期間を取得（デフォルト：過去30〜90日前）
+            from_date = (datetime.now(pytz.UTC) - timedelta(days=self.historical_range_days)).isoformat()
+            to_date = (datetime.now(pytz.UTC) - timedelta(days=self.historical_min_age_days)).isoformat()
+
+            params = {
+                "apiKey": self.news_api_key,
+                "q": query,
+                "language": "ja",
+                "sortBy": "relevancy",
+                "pageSize": max_results,
+                "from": from_date,
+                "to": to_date,
+            }
+
+            response = requests.get(
+                "https://newsapi.org/v2/everything",
+                params=params,
+                timeout=self.config.get("rss_timeout", 10)
+            )
+
+            if response.status_code != 200:
+                logger.warning(f"NewsAPI historical search failed: {response.status_code}")
+                return []
+
+            data = response.json()
+            articles = []
+
+            for item in data.get("articles", [])[:max_results]:
+                published_at = self._parse_datetime(item.get("publishedAt"))
+                if not published_at:
+                    continue
+
+                article = NewsArticle(
+                    title=item.get("title", ""),
+                    summary=item.get("description", ""),
+                    url=item.get("url", ""),
+                    published_at=published_at,
+                    source=item.get("source", {}).get("name", "NewsAPI"),
+                    content=item.get("content", ""),
+                )
+                articles.append(article)
+
+            if articles:
+                logger.info(f"Found {len(articles)} historical articles (1-3 months ago)")
+                for article in articles:
+                    logger.info(f"  [HISTORICAL] {article.published_at.date()}: {article.title[:50]}...")
+
+            return articles
+
+        except Exception as e:
+            logger.warning(f"Failed to search historical articles: {e}")
+            return []
+
+    def _search_web_context(self, main_article: NewsArticle, max_results: int = 2) -> List[NewsArticle]:
+        """
+        Web検索で追加コンテキストを取得（ニュース以外も含む）
+
+        【検索対象】
+        - 企業のIRページ
+        - 公式発表
+        - アナリストレポート
+        - 専門サイトの解説記事
+
+        Args:
+            main_article: メイン記事
+            max_results: 取得する最大数
+
+        Returns:
+            Web検索結果のリスト
+        """
+        # TODO: 将来的にGoogle Custom Search APIやBing Search APIを実装
+        # 現在はNewsAPIのみなのでスキップ
+        logger.info("Web search not yet implemented, skipping")
+        return []
 
     def _extract_keywords(self, text: str) -> set:
         """

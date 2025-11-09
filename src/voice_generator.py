@@ -457,11 +457,18 @@ Whisperの各セグメントに対応する台本の部分を特定し、JSON形
 
             # 補正されたセグメントを返す
             final_segments = []
-            for corrected in corrected_segments:
+            for i, corrected in enumerate(corrected_segments):
+                original_text = whisper_segments[i]["text"]
+                corrected_text = corrected["text"]
+
+                # 補正内容をログ出力（変更があった場合のみ）
+                if original_text != corrected_text:
+                    logger.info(f"[AI CORRECTION] Segment {i}: '{original_text}' -> '{corrected_text}'")
+
                 final_segments.append({
                     "start": corrected["start"],
                     "end": corrected["end"],
-                    "text": corrected["text"]
+                    "text": corrected_text
                 })
 
             logger.info(f"[AI CORRECTION] Successfully corrected {len(final_segments)} segments")
@@ -627,9 +634,13 @@ Whisperの各セグメントに対応する台本の部分を特定し、JSON形
                 new_segments.append(seg)
                 continue
 
-            # 分割が1つだけの場合も元のセグメントを使用
+            # 分割が1つだけの場合も、テキストは補正済みのものを使用
             if len(merged_sentences) == 1:
-                new_segments.append(seg)
+                new_segments.append({
+                    "start": seg_start,
+                    "end": seg_end,
+                    "text": merged_sentences[0]
+                })
                 continue
 
             # セグメント内の各文に時間を按分

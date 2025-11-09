@@ -465,7 +465,7 @@ class VoiceGenerator:
     def _resegment_by_punctuation(self, segments: List[dict]) -> List[dict]:
         """
         句読点（、。）で字幕を再分割
-        Whisperの自動分割を無視して、自然な日本語の区切りで分割する
+        各Whisperセグメント内で句読点分割を行い、セグメント境界は維持する
 
         Args:
             segments: 字幕セグメントのリスト
@@ -476,60 +476,68 @@ class VoiceGenerator:
         if not segments:
             return segments
 
-        # 全セグメントを結合
-        full_text = "".join([seg["text"] for seg in segments])
-        total_start = segments[0]["start"]
-        total_end = segments[-1]["end"]
-        total_duration = total_end - total_start
-
-        if total_duration <= 0:
-            logger.warning("Invalid duration, returning original segments")
-            return segments
-
-        # 句読点で分割（「。」「、」で区切る）
         import re
-        # 句読点の後ろで分割しつつ、句読点自体は保持
-        sentences = re.split(r'([。、])', full_text)
+        new_segments = []
 
-        # 分割結果を結合（句読点を前の文に含める）
-        merged_sentences = []
-        i = 0
-        while i < len(sentences):
-            if sentences[i]:  # 空文字列をスキップ
-                text = sentences[i]
-                # 次が句読点なら結合
-                if i + 1 < len(sentences) and sentences[i + 1] in ['。', '、']:
-                    text += sentences[i + 1]
-                    i += 2
+        # 各Whisperセグメントを個別に処理
+        for seg in segments:
+            seg_text = seg["text"]
+            seg_start = seg["start"]
+            seg_end = seg["end"]
+            seg_duration = seg_end - seg_start
+
+            if seg_duration <= 0:
+                logger.warning(f"Invalid segment duration, skipping: {seg_text[:20]}...")
+                continue
+
+            # このセグメント内で句読点分割
+            sentences = re.split(r'([。、])', seg_text)
+
+            # 分割結果を結合（句読点を前の文に含める）
+            merged_sentences = []
+            i = 0
+            while i < len(sentences):
+                if sentences[i]:  # 空文字列をスキップ
+                    text = sentences[i]
+                    # 次が句読点なら結合
+                    if i + 1 < len(sentences) and sentences[i + 1] in ['。', '、']:
+                        text += sentences[i + 1]
+                        i += 2
+                    else:
+                        i += 1
+
+                    text = text.strip()
+                    if text:
+                        merged_sentences.append(text)
                 else:
                     i += 1
 
-                text = text.strip()
-                if text:
-                    merged_sentences.append(text)
+            # 句読点がない、または分割できない場合は元のセグメントを使用
+            if not merged_sentences:
+                new_segments.append(seg)
+                continue
 
-        if not merged_sentences:
-            logger.warning("No sentences after punctuation split, returning original")
-            return segments
+            # 分割が1つだけの場合も元のセグメントを使用
+            if len(merged_sentences) == 1:
+                new_segments.append(seg)
+                continue
 
-        # 各文の文字数比率から時間を按分
-        total_chars = sum(len(s) for s in merged_sentences)
+            # セグメント内の各文に時間を按分
+            total_chars = sum(len(s) for s in merged_sentences)
+            current_time = seg_start
 
-        new_segments = []
-        current_time = total_start
+            for sentence in merged_sentences:
+                # 文字数比率で時間を計算
+                char_ratio = len(sentence) / total_chars if total_chars > 0 else 0
+                duration = seg_duration * char_ratio
 
-        for sentence in merged_sentences:
-            # 文字数比率で時間を計算
-            char_ratio = len(sentence) / total_chars if total_chars > 0 else 0
-            duration = total_duration * char_ratio
+                new_segments.append({
+                    "start": current_time,
+                    "end": current_time + duration,
+                    "text": sentence
+                })
 
-            new_segments.append({
-                "start": current_time,
-                "end": current_time + duration,
-                "text": sentence
-            })
-
-            current_time += duration
+                current_time += duration
 
         logger.info(f"Resegmented: {len(segments)} Whisper segments → {len(new_segments)} punctuation-based segments")
         return new_segments

@@ -173,7 +173,7 @@ class NewsFetcher:
             # クエリパラメータ（金融・市場に特化）
             params = {
                 "apiKey": self.news_api_key,
-                "q": "金融 OR 株式市場 OR 為替 OR 債券 OR 中央銀行 OR 金融政策 OR 投資",
+                "q": "半導体 OR AI OR NVIDIA OR テクノロジー OR 株式市場 OR 金融 OR 投資",
                 "language": "ja",
                 "sortBy": "publishedAt",
                 "pageSize": self.max_articles * 2,  # 多めに取得してフィルタ

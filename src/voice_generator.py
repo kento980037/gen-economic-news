@@ -431,28 +431,47 @@ class VoiceGenerator:
             logger.warning("[SUBTITLE] No sentences from script, returning original")
             return whisper_segments
 
-        # 文字数比率で時間を按分
-        logger.info("[SUBTITLE] Calculating timing for each sentence...")
-        total_chars = sum(len(s) for s in merged_sentences)
-        new_segments = []
-        current_time = total_start
+        # Whisperのタイミングを使いつつ、台本テキストをマッピング
+        logger.info("[SUBTITLE] Mapping script sentences to Whisper timestamps...")
 
-        for idx, sentence in enumerate(merged_sentences):
-            char_ratio = len(sentence) / total_chars if total_chars > 0 else 0
-            duration = total_duration * char_ratio
+        # 台本の文を、Whisperセグメント数に合わせて再グループ化
+        if len(merged_sentences) <= len(whisper_segments):
+            # 台本の文が少ない場合：Whisperセグメントをマージして台本に合わせる
+            segments_per_sentence = len(whisper_segments) // len(merged_sentences)
+            new_segments = []
 
-            new_segments.append({
-                "start": current_time,
-                "end": current_time + duration,
-                "text": sentence
-            })
+            for idx, sentence in enumerate(merged_sentences):
+                start_idx = idx * segments_per_sentence
+                end_idx = start_idx + segments_per_sentence if idx < len(merged_sentences) - 1 else len(whisper_segments)
 
-            current_time += duration
+                if start_idx < len(whisper_segments):
+                    start_time = whisper_segments[start_idx]["start"]
+                    end_time = whisper_segments[min(end_idx - 1, len(whisper_segments) - 1)]["end"]
 
-            if (idx + 1) % 10 == 0:
-                logger.info(f"[SUBTITLE] Processed {idx + 1}/{len(merged_sentences)} sentences")
+                    new_segments.append({
+                        "start": start_time,
+                        "end": end_time,
+                        "text": sentence
+                    })
+        else:
+            # 台本の文が多い場合：台本をWhisperセグメント数に合わせる
+            sentences_per_segment = len(merged_sentences) // len(whisper_segments)
+            new_segments = []
 
-        logger.info(f"[SUBTITLE] Created {len(new_segments)} subtitle segments from script")
+            for idx, whisper_seg in enumerate(whisper_segments):
+                start_idx = idx * sentences_per_segment
+                end_idx = start_idx + sentences_per_segment if idx < len(whisper_segments) - 1 else len(merged_sentences)
+
+                # 複数の台本文を結合
+                combined_text = "".join(merged_sentences[start_idx:end_idx])
+
+                new_segments.append({
+                    "start": whisper_seg["start"],
+                    "end": whisper_seg["end"],
+                    "text": combined_text
+                })
+
+        logger.info(f"[SUBTITLE] Created {len(new_segments)} subtitle segments from script (using Whisper timing)")
         return new_segments
 
     def _resegment_by_punctuation(self, segments: List[dict]) -> List[dict]:

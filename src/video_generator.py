@@ -704,20 +704,41 @@ class VideoGenerator:
 
             text_color = self._hex_to_rgb(self.thumbnail_config.get("text_color", "#ffffff"))
 
-            # メインテキスト（大きい文字）
-            main_font_size = 180  # 大きく（250 → 180に調整）
+            # メインテキスト（大きい文字）- 動的にサイズ調整
+            main_font_size = 180  # 基本サイズ
+            max_width = width - 100  # 左右50pxずつの余白
+
+            # メインテキストが長い場合はフォントサイズを縮小
             main_font = self._load_japanese_font(main_font_size)
+            main_bbox = draw.textbbox((0, 0), main_text, font=main_font)
+            main_width = main_bbox[2] - main_bbox[0]
 
-            # サブテキスト（小さい文字）
-            sub_font_size = 70  # メインの約1/2.5（80 → 70に調整）
+            # 画面幅を超える場合はフォントサイズを縮小
+            if main_width > max_width:
+                # 縮小率を計算
+                scale = max_width / main_width
+                main_font_size = int(main_font_size * scale * 0.95)  # 少し余裕を持たせる
+                main_font = self._load_japanese_font(main_font_size)
+                logger.info(f"Main font size adjusted: 180 -> {main_font_size}")
+
+            # サブテキスト（小さい文字）- 動的にサイズ調整
+            sub_font_size = 70  # 基本サイズ
             sub_font = self._load_japanese_font(sub_font_size)
+            sub_bbox = draw.textbbox((0, 0), sub_text, font=sub_font)
+            sub_width = sub_bbox[2] - sub_bbox[0]
 
-            # メインテキストの位置を計算（中央やや上）
+            # 画面幅を超える場合はフォントサイズを縮小
+            if sub_width > max_width:
+                scale = max_width / sub_width
+                sub_font_size = int(sub_font_size * scale * 0.95)
+                sub_font = self._load_japanese_font(sub_font_size)
+                logger.info(f"Sub font size adjusted: 70 -> {sub_font_size}")
+
+            # 調整後のサイズで再計算
             main_bbox = draw.textbbox((0, 0), main_text, font=main_font)
             main_width = main_bbox[2] - main_bbox[0]
             main_height = main_bbox[3] - main_bbox[1]
 
-            # サブテキストの位置を計算
             sub_bbox = draw.textbbox((0, 0), sub_text, font=sub_font)
             sub_width = sub_bbox[2] - sub_bbox[0]
             sub_height = sub_bbox[3] - sub_bbox[1]

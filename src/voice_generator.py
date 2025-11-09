@@ -374,8 +374,8 @@ class VoiceGenerator:
 
     def _create_subtitles_from_script(self, script_text: str, whisper_segments: List[dict]) -> List[dict]:
         """
-        台本から直接字幕を生成（高速版）
-        Whisperのセグメント情報は時間情報のみ使用
+        台本から字幕を生成（Whisperセグメント単位で時間マッピング）
+        Whisperの各セグメントに対応する台本部分を特定し、そのセグメントの時間範囲内で配置
 
         Args:
             script_text: 台本テキスト
@@ -390,25 +390,13 @@ class VoiceGenerator:
             logger.info("[SUBTITLE] No whisper segments, returning empty")
             return []
 
-        # 全体の時間範囲を取得
-        logger.info("[SUBTITLE] Calculating time range...")
-        total_start = whisper_segments[0]["start"]
-        total_end = whisper_segments[-1]["end"]
-        total_duration = total_end - total_start
-        logger.info(f"[SUBTITLE] Time range: {total_start:.2f}s - {total_end:.2f}s (duration: {total_duration:.2f}s)")
-
-        if total_duration <= 0:
-            logger.warning("[SUBTITLE] Invalid duration, returning empty")
-            return []
+        import re
 
         # 台本を句読点で分割
         logger.info(f"[SUBTITLE] Splitting script text ({len(script_text)} chars)...")
-        import re
         sentences = re.split(r'([。、])', script_text)
-        logger.info(f"[SUBTITLE] Split into {len(sentences)} parts")
 
         # 句読点を前の文に含める
-        logger.info("[SUBTITLE] Merging punctuation...")
         merged_sentences = []
         i = 0
         while i < len(sentences):
@@ -423,7 +411,6 @@ class VoiceGenerator:
                 if text:
                     merged_sentences.append(text)
             else:
-                # 空文字列の場合もiを進める（無限ループ防止）
                 i += 1
         logger.info(f"[SUBTITLE] Merged into {len(merged_sentences)} sentences")
 
@@ -431,38 +418,54 @@ class VoiceGenerator:
             logger.warning("[SUBTITLE] No sentences from script, returning original")
             return whisper_segments
 
-        # 文字数比率で時間を按分（均等配分で累積誤差を最小化）
-        logger.info("[SUBTITLE] Calculating timing for each sentence...")
-        total_chars = sum(len(s) for s in merged_sentences)
+        # 各Whisperセグメントに台本の文を割り当て
+        # Whisperセグメント数と台本の文数の比率を計算
+        num_whisper_segs = len(whisper_segments)
+        num_script_sentences = len(merged_sentences)
+
+        logger.info(f"[SUBTITLE] Mapping {num_script_sentences} script sentences to {num_whisper_segs} Whisper segments")
+
+        # 台本の文をWhisperセグメントに均等に割り当て
+        sentences_per_segment = num_script_sentences / num_whisper_segs
+
         new_segments = []
+        script_idx = 0
 
-        # 時間を正確に配分するため、残り時間を追跡
-        remaining_duration = total_duration
-        remaining_chars = total_chars
-        current_time = total_start
+        for seg_idx, whisper_seg in enumerate(whisper_segments):
+            seg_start = whisper_seg["start"]
+            seg_end = whisper_seg["end"]
+            seg_duration = seg_end - seg_start
 
-        for idx, sentence in enumerate(merged_sentences):
-            sentence_chars = len(sentence)
+            # このWhisperセグメントに割り当てる台本の文数を計算
+            start_sentence_idx = int(seg_idx * sentences_per_segment)
+            end_sentence_idx = int((seg_idx + 1) * sentences_per_segment)
 
-            # 最後のセグメント以外は文字数比率で計算
-            if idx < len(merged_sentences) - 1:
-                duration = (sentence_chars / total_chars) * total_duration
-            else:
-                # 最後のセグメントは残り時間を全て使う（累積誤差を解消）
-                duration = remaining_duration
+            # 最後のセグメントは残り全てを含める
+            if seg_idx == num_whisper_segs - 1:
+                end_sentence_idx = num_script_sentences
 
-            new_segments.append({
-                "start": current_time,
-                "end": current_time + duration,
-                "text": sentence
-            })
+            # このセグメントに対応する台本の文を取得
+            segment_sentences = merged_sentences[start_sentence_idx:end_sentence_idx]
 
-            current_time += duration
-            remaining_duration -= duration
-            remaining_chars -= sentence_chars
+            if not segment_sentences:
+                continue
 
-            if (idx + 1) % 10 == 0:
-                logger.info(f"[SUBTITLE] Processed {idx + 1}/{len(merged_sentences)} sentences")
+            # このWhisperセグメントの時間範囲内で、台本の文を文字数比率で配置
+            total_chars = sum(len(s) for s in segment_sentences)
+            current_time = seg_start
+
+            for sentence in segment_sentences:
+                # 文字数比率で時間を計算
+                char_ratio = len(sentence) / total_chars if total_chars > 0 else 1.0 / len(segment_sentences)
+                duration = seg_duration * char_ratio
+
+                new_segments.append({
+                    "start": current_time,
+                    "end": current_time + duration,
+                    "text": sentence
+                })
+
+                current_time += duration
 
         logger.info(f"[SUBTITLE] Created {len(new_segments)} subtitle segments from script")
         return new_segments

@@ -508,10 +508,10 @@ class NewsFetcher:
         メイン記事に関連する記事・コンテキスト情報を取得（情報の厚みを作る）
 
         【目的】台本作成の情報を充実させる
-        1. NewsAPIで動的に検索（メイン記事のキーワードで検索）
-        2. 既存のキャッシュ記事からも類似記事を探す
-        3. 過去の関連記事を検索（時系列比較用）
-        4. Web検索で追加コンテキスト取得（ニュース以外も含む）
+        1. OpenAI APIでメイン記事から「深掘りすべきキーワード」を抽出
+        2. 各キーワードについて個別にNewsAPIで検索（補足情報を取得）
+        3. 既存のキャッシュ記事からも類似記事を探す
+        4. 過去の関連記事を検索（時系列比較用）
 
         Args:
             main_article: メイン記事
@@ -524,10 +524,30 @@ class NewsFetcher:
 
         all_candidates = []
 
-        # 1. NewsAPIで動的に検索（最優先）
-        logger.info("Step 1: Dynamic search via NewsAPI")
+        # 0. OpenAI APIで深掘りすべきキーワードを抽出
+        logger.info("Step 0: Extracting deep-dive keywords via OpenAI")
+        deep_dive_keywords = self._extract_deep_dive_keywords(main_article)
+
+        # 1. 深掘りキーワードで個別に検索（最優先）
+        logger.info("Step 1: Searching for deep-dive topics")
+        # より多くのキーワードで検索（3 → 5）
+        for keyword in deep_dive_keywords[:5]:  # 上位5つのキーワードで検索
+            logger.info(f"  Searching for deep-dive topic: {keyword}")
+            topic_articles = self._search_by_specific_topic(keyword, max_results=4)
+
+            # 重複を除外しながら追加
+            existing_urls = {a.url for a, _, _ in all_candidates} | {main_article.url}
+            for article in topic_articles:
+                if article.url not in existing_urls:
+                    # 深掘り記事には高いスコアを付与
+                    all_candidates.append((article, 0.9, "deep-dive"))
+                    existing_urls.add(article.url)
+
+        # 2. NewsAPIで動的に検索（補完的）
+        logger.info("Step 2: Dynamic search via NewsAPI")
+        # より多くの記事を取得（max_related * 3で十分な候補を確保）
         dynamic_articles = self._search_related_articles_dynamic(
-            main_article, max_results=max_related * 2
+            main_article, max_results=max_related * 3
         )
 
         # メイン記事のテキストと埋め込みベクトルを取得
@@ -554,8 +574,8 @@ class NewsFetcher:
                         all_candidates.append((article, relevance_score, "dynamic"))
                         logger.debug(f"  [Dynamic] {article.title[:50]}... similarity: {relevance_score:.3f}")
 
-        # 2. キャッシュされた記事からも検索（補完的）
-        logger.info("Step 2: Searching cached articles")
+        # 3. キャッシュされた記事からも検索（補完的）
+        logger.info("Step 3: Searching cached articles")
         if self._cached_articles is not None:
             cached_articles = self._cached_articles
         else:
@@ -580,14 +600,15 @@ class NewsFetcher:
 
                     if article_embedding is not None:
                         relevance_score = self._cosine_similarity(main_embedding, article_embedding)
-                        # 閾値チェック（キャッシュ記事は閾値0.5以上のみ）
-                        if relevance_score > 0.5:
+                        # 閾値チェック（キャッシュ記事は閾値0.3以上に緩和：より多くの関連記事を取得）
+                        if relevance_score > 0.3:
                             all_candidates.append((article, relevance_score, "cached"))
                             logger.debug(f"  [Cached] {article.title[:50]}... similarity: {relevance_score:.3f}")
 
-        # 3. 過去の関連記事を検索（時系列比較用）
-        logger.info("Step 3: Searching historical articles for context")
-        historical_articles = self._search_historical_context(main_article, max_results=4)
+        # 4. 過去の関連記事を検索（時系列比較用）
+        logger.info("Step 4: Searching historical articles for context")
+        # より多くの過去記事を取得（時系列比較のため）
+        historical_articles = self._search_historical_context(main_article, max_results=8)
 
         if historical_articles and main_embedding is not None:
             article_texts = [f"{a.title} {a.summary}" for a in historical_articles]
@@ -603,12 +624,12 @@ class NewsFetcher:
                     all_candidates.append((article, relevance_score, "historical"))
                     logger.debug(f"  [Historical] {article.title[:50]}... similarity: {relevance_score:.3f}")
 
-        # 4. Web検索（将来実装）
-        # logger.info("Step 4: Searching web for additional context")
+        # 5. Web検索（将来実装）
+        # logger.info("Step 5: Searching web for additional context")
         # web_articles = self._search_web_context(main_article, max_results=1)
         # （省略）
 
-        # 5. スコアでソートして上位を返す
+        # 6. スコアでソートして上位を返す
         all_candidates.sort(key=lambda x: x[1], reverse=True)
 
         if all_candidates:
@@ -655,9 +676,11 @@ class NewsFetcher:
 
             query = " AND ".join(sorted_keywords)
 
-            # 設定から期間を取得（デフォルト：過去30〜90日前）
+            # 設定から期間を取得（デフォルト：過去7〜90日前）
+            # 最小年齢を7日に短縮（30日 → 7日）してより新しい過去記事も取得
+            min_age_days = min(7, self.historical_min_age_days)
             from_date = (datetime.now(pytz.UTC) - timedelta(days=self.historical_range_days)).isoformat()
-            to_date = (datetime.now(pytz.UTC) - timedelta(days=self.historical_min_age_days)).isoformat()
+            to_date = (datetime.now(pytz.UTC) - timedelta(days=min_age_days)).isoformat()
 
             params = {
                 "apiKey": self.news_api_key,
@@ -907,6 +930,143 @@ class NewsFetcher:
 
         return jaccard
 
+    def _extract_deep_dive_keywords(self, main_article: NewsArticle) -> List[str]:
+        """
+        OpenAI APIを使ってメイン記事から「深掘りすべきキーワード」を抽出
+
+        【目的】
+        メイン記事で一言しか触れられていないが、重要な用語・企業名・概念を特定し、
+        それらについて詳しく調べるための検索クエリを生成する
+
+        Args:
+            main_article: メイン記事
+
+        Returns:
+            深掘りすべきキーワードのリスト（重要度順）
+        """
+        if not self.openai_client:
+            logger.warning("OpenAI client not initialized, falling back to simple keyword extraction")
+            return list(self._extract_keywords(main_article.title))[:5]
+
+        try:
+            prompt = f"""
+以下の金融ニュース記事を分析してください。
+
+【記事情報】
+タイトル: {main_article.title}
+本文: {main_article.content[:1000] if main_article.content else main_article.summary}
+
+【タスク】
+この記事で言及されているが、詳細が不足している重要な要素を5つ抽出してください。
+台本作成時に深掘りして説明すべきキーワードです。
+
+【抽出すべき要素の例】
+- 企業名（例：「NVIDIA」「トヨタ自動車」）
+- 専門用語・概念（例：「量的緩和」「PER」「AI半導体」）
+- 経済指標（例：「CPI」「GDP」「失業率」）
+- 政策・制度（例：「ゼロ金利政策」「インボイス制度」）
+- 人物名（例：「パウエルFRB議長」「イーロン・マスク」）
+- 製品・サービス名（例：「ChatGPT」「iPhone 15」）
+
+【重要】
+- 一般的すぎる単語（「市場」「株価」「経済」）は避ける
+- 具体的で検索可能なキーワードを選ぶ
+- 記事で詳しく説明されていない要素を優先
+- 日本語で出力
+
+【出力形式】
+各行に1つずつキーワードを出力してください（説明不要）。
+重要度順に並べてください。
+
+例：
+NVIDIA
+量的緩和
+パウエルFRB議長
+AI半導体市場
+CPI（消費者物価指数）
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "あなたは金融ニュース分析の専門家です。記事から深掘りすべき重要キーワードを抽出してください。"},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.3,
+            )
+
+            result = response.choices[0].message.content.strip()
+            keywords = [line.strip() for line in result.split('\n') if line.strip()]
+
+            logger.info(f"Extracted {len(keywords)} deep-dive keywords: {', '.join(keywords[:3])}...")
+            return keywords
+
+        except Exception as e:
+            logger.error(f"Error extracting deep-dive keywords: {e}")
+            # フォールバック：通常のキーワード抽出
+            return list(self._extract_keywords(main_article.title))[:5]
+
+    def _search_by_specific_topic(self, topic: str, max_results: int = 3) -> List[NewsArticle]:
+        """
+        特定のトピックについてNewsAPIで検索
+
+        Args:
+            topic: 検索するトピック（例：「NVIDIA」「量的緩和」）
+            max_results: 取得する記事の最大数
+
+        Returns:
+            検索された記事のリスト
+        """
+        if not self.news_api_key:
+            logger.debug(f"NEWS_API_KEY not set, skipping topic search for: {topic}")
+            return []
+
+        try:
+            # NewsAPI エンドポイント
+            url = "https://newsapi.org/v2/everything"
+
+            # クエリパラメータ
+            params = {
+                "apiKey": self.news_api_key,
+                "q": topic,  # 特定トピックで検索
+                "language": "ja",
+                "sortBy": "relevancy",
+                "pageSize": max_results,
+                "from": (datetime.now() - timedelta(days=30)).isoformat(),  # 30日間
+            }
+
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("status") != "ok":
+                logger.warning(f"NewsAPI error for topic '{topic}': {data.get('message')}")
+                return []
+
+            articles = []
+            for item in data.get("articles", []):
+                published_at = self._parse_datetime(item.get("publishedAt"))
+                if not published_at:
+                    continue
+
+                article = NewsArticle(
+                    title=item.get("title", ""),
+                    summary=item.get("description", ""),
+                    url=item.get("url", ""),
+                    published_at=published_at,
+                    source=item.get("source", {}).get("name", "NewsAPI"),
+                    content=item.get("content", ""),
+                )
+                articles.append(article)
+
+            logger.debug(f"Found {len(articles)} articles for topic: {topic}")
+            return articles
+
+        except Exception as e:
+            logger.warning(f"Error searching for topic '{topic}': {e}")
+            return []
+
     def _search_related_articles_dynamic(
         self, main_article: NewsArticle, max_results: int = 5
     ) -> List[NewsArticle]:
@@ -946,6 +1106,7 @@ class NewsFetcher:
             url = "https://newsapi.org/v2/everything"
 
             # クエリパラメータ
+            # 関連記事検索では時間範囲を拡大（7日間）して、より多くの記事を取得
             params = {
                 "apiKey": self.news_api_key,
                 "q": query,
@@ -953,7 +1114,7 @@ class NewsFetcher:
                 "sortBy": "relevancy",  # 関連度順にソート
                 "pageSize": max_results * 2,  # 多めに取得してフィルタ
                 "from": (
-                    datetime.now() - timedelta(hours=self.max_age_hours)
+                    datetime.now() - timedelta(days=7)  # 7日間に拡大（24時間 → 7日間）
                 ).isoformat(),
             }
 

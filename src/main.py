@@ -184,34 +184,61 @@ class VideoGenerationPipeline:
         return main_article
 
     def _generate_script(self, news_article):
-        """台本を生成（OpenAI検索でコンテキスト取得）"""
+        """台本を生成（関連記事を取得してコンテキストを充実）"""
         target_duration = self.config.get("app", {}).get("target_duration", 180)
 
-        # OpenAI APIで関連コンテキストを取得
-        logger.info("Fetching related context via OpenAI...")
-        openai_context = self.news_fetcher.get_related_context_openai(news_article)
+        # 関連記事を取得（最大10本：情報の厚みを作る）
+        logger.info("Fetching related articles for context...")
+        related_articles = self.news_fetcher.get_related_articles(
+            news_article, max_related=10
+        )
 
-        # 関連コンテキストを追加情報として整形
+        # 取得した関連記事をインスタンス変数に保存（メタデータ生成で使用）
+        self.related_articles = related_articles
+
+        # 関連記事の内容を整形
         additional_context = None
-        if openai_context:
-            additional_context = f"""
-【OpenAI検索で収集した追加コンテキスト】
+        if related_articles:
+            logger.info(f"Found {len(related_articles)} related articles for context")
 
-以下は、OpenAI APIを使って収集した関連情報です。
-台本作成時に、これらの情報を活用して多角的で深みのある解説を作成してください。
+            # 関連記事の情報を詳しく整形
+            context_parts = ["【参考：関連記事】\n"]
+            context_parts.append("以下は、メイン記事に関連する記事です。")
+            context_parts.append("これらの情報を活用して、多角的で深みのある解説を作成してください。\n")
 
-{openai_context}
+            for i, article in enumerate(related_articles, 1):
+                context_parts.append(f"\n## 参考記事 {i}")
+                context_parts.append(f"**タイトル**: {article.title}")
+                context_parts.append(f"**ソース**: {article.source}")
+                context_parts.append(f"**公開日**: {article.published_at.strftime('%Y年%m月%d日')}")
+                context_parts.append(f"**要約**: {article.summary}")
 
-【重要な指示】
-1. 上記の背景・文脈を踏まえて、なぜこのニュースが重要かを説明
-2. 過去の類似ケースとの比較で、今後の展開を予測
-3. 市場への影響を具体的に（株価、為替、投資判断など）
-4. 専門家の見解や統計データを引用して説得力を持たせる
-5. 投資家にとって実践的なポイントを明確に
-"""
-            logger.info("Using OpenAI-generated context for script generation")
+                # contentフィールドがあれば本文も追加（より詳しい情報）
+                if article.content and len(article.content) > len(article.summary):
+                    context_parts.append(f"**本文**: {article.content[:1000]}...")
+
+                context_parts.append("")  # 空行
+
+            # OpenAI APIで追加の背景情報を取得（補助的）
+            logger.info("Fetching additional background context via OpenAI...")
+            openai_context = self.news_fetcher.get_related_context_openai(news_article)
+
+            if openai_context:
+                context_parts.append("\n【背景情報（OpenAI生成）】")
+                context_parts.append(openai_context)
+
+            # 台本作成の指示を追加
+            context_parts.append("\n【重要な指示】")
+            context_parts.append("1. 上記の関連記事から具体的な数字・企業名・事例を引用してください")
+            context_parts.append("2. 複数の情報源を統合して、多角的な分析を行ってください")
+            context_parts.append("3. 過去の記事があれば、時系列比較で「前四半期比」などの表現を使ってください")
+            context_parts.append("4. 市場への影響を具体的に（株価の変動率、為替レートなど）")
+            context_parts.append("5. 抽象的な表現は避け、常に具体例を挙げてください")
+
+            additional_context = "\n".join(context_parts)
+            logger.info(f"Context prepared: {len(additional_context)} characters")
         else:
-            logger.info("No additional context from OpenAI, using main article only")
+            logger.warning("No related articles found, using main article only")
 
         return self.script_generator.generate_script(
             news_article.to_dict(),

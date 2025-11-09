@@ -705,11 +705,11 @@ class VideoGenerator:
             text_color = self._hex_to_rgb(self.thumbnail_config.get("text_color", "#ffffff"))
 
             # メインテキスト（大きい文字）
-            main_font_size = 250  # 超大きく
+            main_font_size = 180  # 大きく（250 → 180に調整）
             main_font = self._load_japanese_font(main_font_size)
 
             # サブテキスト（小さい文字）
-            sub_font_size = 80  # メインの約1/3
+            sub_font_size = 70  # メインの約1/2.5（80 → 70に調整）
             sub_font = self._load_japanese_font(sub_font_size)
 
             # メインテキストの位置を計算（中央やや上）

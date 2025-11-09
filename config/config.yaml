@@ -82,8 +82,8 @@ script:
   max_length: 3000   # 十分な詳細度を確保
 
   # スタイル設定
-  tone: "professional"  # professional, casual, friendly
-  style: "narration"  # narration, dialogue
+  tone: "casual"  # professional, casual, friendly
+  style: "dialogue"  # narration, dialogue
 
   # プロンプトテンプレート（YouTube金融ポッドキャスト最適化）
   system_prompt: |

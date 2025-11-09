@@ -431,9 +431,17 @@ Whisperの各セグメントに対応する台本の部分を特定し、JSON形
 【重要なルール】
 1. 各セグメントのstart/endタイミングは絶対に変更しない
 2. textのみを台本から抽出して置き換える
-3. Whisperのセグメント数と同じ数のセグメントを出力する
+3. Whisperのセグメント数と同じ数のセグメントを出力する（必須）
 4. 台本の順序を保ち、Whisperのタイミングに合わせて配分する
 5. 句読点も台本通りに含める
+6. Whisperのセグメントが長い場合でも、そのセグメントに対応する台本部分全体を1つのセグメントとして出力する
+7. 字幕として読みやすいように、句点（。）で区切られた文単位でテキストを配置する
+8. 各Whisperセグメントの時間範囲内に、複数の文が含まれる場合も、それらをまとめて1つのセグメントとする
+
+【例】
+Whisperセグメント: 0-10秒「きょうわけいざいにゅーすですにちぎんがはっぴょうしました」
+台本: 「今日は経済ニュースです。日銀が発表しました。」
+→ 出力: {{"index": 0, "text": "今日は経済ニュースです。日銀が発表しました。", "start": 0.0, "end": 10.0}}
 """
 
             response = openai_client.chat.completions.create(
@@ -473,8 +481,9 @@ Whisperの各セグメントに対応する台本の部分を特定し、JSON形
 
             logger.info(f"[AI CORRECTION] Successfully corrected {len(final_segments)} segments")
 
-            # 句読点で再分割して細かく
-            return self._resegment_by_punctuation(final_segments)
+            # AI補正済みのセグメントをそのまま返す（再分割しない）
+            # 句読点での再分割は文字数按分のため、実際の音声とズレが生じる
+            return final_segments
 
         except Exception as e:
             logger.error(f"[AI CORRECTION] Failed: {e}")

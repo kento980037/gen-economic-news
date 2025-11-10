@@ -6,6 +6,7 @@ OpenAI TTS APIまたはGemini TTS APIを使用してテキストから音声を�
 import os
 import logging
 import wave
+import json
 from pathlib import Path
 from typing import Dict, Optional, List
 from openai import OpenAI
@@ -414,7 +415,13 @@ class VoiceGenerator:
 
 【タスク】
 Whisperの各セグメントに対応する台本の部分を特定し、JSON形式で出力してください。
-各セグメントのタイミングは維持しつつ、テキストを台本通りに補正します。
+タイミングはWhisperのものをそのまま使用し、テキストのみを台本通りに補正します。
+
+⚠️ 【最重要】セグメント数の厳守：
+- Whisperセグメント数: {len(whisper_segments)}個
+- 出力するセグメント数: {len(whisper_segments)}個（必ず同じ数にする）
+- セグメントを統合したり分割したりしない
+- 各Whisperセグメントに対して、1対1で台本テキストを割り当てる
 
 ⚠️ 【超重要】テキストの正確性について：
 - 台本のテキストを一字一句正確にコピーしてください
@@ -422,37 +429,48 @@ Whisperの各セグメントに対応する台本の部分を特定し、JSON形
 - Whisperの誤認識を台本で完全に修正してください
 - 台本にない言葉を追加したり、台本の言葉を変更したりしないでください
 
-【Whisperセグメント】
-{[{"index": i, "text": seg["text"], "start": seg["start"], "end": seg["end"]} for i, seg in enumerate(whisper_segments)]}
+【Whisperセグメント数】
+合計: {len(whisper_segments)}個
+
+【Whisperセグメント詳細】
+"""
+            # Whisperセグメント情報をJSON形式で追加
+            whisper_segments_json = json.dumps(
+                [{"index": i, "text": seg["text"], "start": seg["start"], "end": seg["end"]}
+                 for i, seg in enumerate(whisper_segments)],
+                ensure_ascii=False,
+                indent=2
+            )
+
+            prompt += whisper_segments_json
+
+            prompt += f"""
 
 【出力形式】
 以下のJSON形式で出力してください（他のテキストは一切含めないでください）:
 {{
   "corrected_segments": [
     {{"index": 0, "text": "台本から抽出した対応テキスト", "start": 0.0, "end": 2.5}},
-    {{"index": 1, "text": "台本から抽出した対応テキスト", "start": 2.5, "end": 5.0}}
+    {{"index": 1, "text": "台本から抽出した対応テキスト", "start": 2.5, "end": 5.0}},
+    ...
+    {{"index": {len(whisper_segments) - 1}, "text": "最後のセグメント", "start": X, "end": Y}}
   ]
 }}
 
+⚠️ 配列の要素数は必ず{len(whisper_segments)}個にしてください。
+
 【重要なルール】
-1. 各セグメントのstart時間は変更しない
-2. endタイミングは、テキスト量に応じて適切に調整する（テキストが長い場合は次のセグメントの直前まで延長可能）
+1. 【絶対厳守】出力セグメント数 = {len(whisper_segments)}個（1個も多くせず、1個も少なくしない）
+2. 各セグメントのstart/end時間はWhisperのものをそのままコピーする
 3. textのみを台本から抽出して置き換える
-4. Whisperのセグメント数と同じ数のセグメントを出力する（必須）
-5. 台本の順序を保ち、Whisperのタイミングに合わせて配分する
-6. 句読点も台本通りに含める
-7. Whisperのセグメントが長い場合でも、そのセグメントに対応する台本部分全体を1つのセグメントとして出力する
-8. 字幕として読みやすいように、句点（。）で区切られた文単位でテキストを配置する
-9. 各Whisperセグメントの時間範囲内に、複数の文が含まれる場合も、それらをまとめて1つのセグメントとする
-10. 【重要】Whisperのendタイミングが明らかに短すぎる場合（テキスト量に対して）、次のセグメントの開始時間の直前まで延長する
-11. 【最重要】セグメント境界での文の分断を防ぐ：
-    - 台本の1つの完結した文（句点「。」で終わる）は、必ず1つのセグメントに完全に含める
-    - 文の途中でセグメントを区切らない
-    - もしWhisperセグメントの境界が文の途中にある場合は、その文全体を前のセグメントまたは後のセグメントのどちらかに完全に含める
-    - 判断基準：その文の大部分がどちらのWhisperセグメントに含まれているかで決定
-    - 例：Whisper「...最近のインタビューで」(seg1) + 「インフレと生産性の...」(seg2) の場合
-      → seg1: "...最近のインタビューで、「インフレと生産性の動向に注目している」と述べ、..."（文全体をseg1に含める）
-      → seg2: 次の完結した文から開始
+4. 台本の順序を保ち、Whisperのタイミングに合わせて配分する
+5. 句読点も台本通りに含める
+6. 各Whisperセグメントに対応する台本部分を特定し、そのテキストを割り当てる
+7. もしWhisperセグメント境界が台本の文の途中にある場合：
+   - そのWhisperセグメントに対応する台本部分（文の一部でも可）をそのまま割り当てる
+   - セグメントを統合せず、分割もせず、{len(whisper_segments)}個を維持する
+   - 例：Whisper seg1「...インタビューで」 → 台本「...インタビューで、」
+        Whisper seg2「インフレと...」 → 台本「「インフレと生産性の動向に注目している」と述べ、...」
 
 【漢字・表記の訂正について】
 Whisperは音声認識のため、同音異義語や漢字の誤認識が発生します。必ず台本の正確な表記を使用してください。
@@ -465,34 +483,14 @@ Whisperは音声認識のため、同音異義語や漢字の誤認識が発生�
 
 → 必ず台本のテキストをそのまま使用してください
 
-【タイミング延長の判断基準】
-- 日本語の平均読み上げ速度は約300文字/分 = 5文字/秒
-- セグメント時間内に表示する文字数の目安：duration(秒) × 5文字
-- 例：3秒のセグメントなら15文字程度が適切
-- 台本テキストが30文字以上なのにdurationが3秒未満の場合 → 延長が必要
-- 延長する場合は、次のセグメントの開始時間の0.1秒前まで延長する
+【出力例】
+Whisperセグメント0: 0-10秒「きょうわけいざいにゅーすです」
+→ 出力: {{"index": 0, "text": "今日は経済ニュースです。", "start": 0.0, "end": 10.0}}
 
-【例1：正常な場合】
-Whisperセグメント: 0-10秒「きょうわけいざいにゅーすですにちぎんがはっぴょうしました」（duration: 10秒）
-台本: 「今日は経済ニュースです。日銀が発表しました。」（26文字）
-→ 10秒 × 5文字/秒 = 50文字 > 26文字 → 延長不要
-→ 出力: {{"index": 0, "text": "今日は経済ニュースです。日銀が発表しました。", "start": 0.0, "end": 10.0}}
+Whisperセグメント1: 10-20秒「にちぎんがはっぴょうしました」
+→ 出力: {{"index": 1, "text": "日銀が発表しました。", "start": 10.0, "end": 20.0}}
 
-【例2：endタイミングが短すぎる場合】
-Whisperセグメント0: 0-3秒「こんにちは」（duration: 3秒、次のセグメント開始: 6.0秒）
-台本: 「こんにちは。今日は経済ニュースをお伝えします。」（25文字）
-→ 3秒 × 5文字/秒 = 15文字 < 25文字 → 延長が必要
-→ 必要なduration: 25文字 ÷ 5文字/秒 = 5秒
-→ 次のセグメントは6.0秒から開始なので、5.9秒まで延長可能
-→ 出力: {{"index": 0, "text": "こんにちは。今日は経済ニュースをお伝えします。", "start": 0.0, "end": 5.9}}
-
-【例3：複数文がある場合】
-Whisperセグメント0: 0-4秒「にほんぎんこうがせいさくきんりをひきあげ」（duration: 4秒、次: 8.0秒）
-台本: 「日本銀行が政策金利を引き上げました。これは2007年以来の利上げとなります。」（42文字）
-→ 4秒 × 5文字/秒 = 20文字 < 42文字 → 延長が必要
-→ 必要なduration: 42文字 ÷ 5文字/秒 = 8.4秒
-→ 次のセグメントは8.0秒から開始なので、7.9秒まで延長
-→ 出力: {{"index": 0, "text": "日本銀行が政策金利を引き上げました。これは2007年以来の利上げとなります。", "start": 0.0, "end": 7.9}}
+⚠️ 再確認：出力配列の長さは必ず{len(whisper_segments)}個です。多くても少なくてもいけません。
 """
 
             response = openai_client.chat.completions.create(
@@ -505,28 +503,30 @@ Whisperセグメント0: 0-4秒「にほんぎんこうがせいさくきんり�
                 response_format={"type": "json_object"}
             )
 
-            import json
             result = json.loads(response.choices[0].message.content)
             corrected_segments = result.get("corrected_segments", [])
 
+            # セグメント数のチェック（タイミング精度のため厳格にチェック）
             if len(corrected_segments) != len(whisper_segments):
-                logger.warning(f"Segment count mismatch: expected {len(whisper_segments)}, got {len(corrected_segments)}")
-                # フォールバック
+                logger.warning(
+                    f"Segment count mismatch: expected {len(whisper_segments)}, "
+                    f"got {len(corrected_segments)}. Falling back to punctuation-based segmentation."
+                )
+                # セグメント数が異なる場合は、タイミングズレを防ぐためフォールバック
                 return self._resegment_by_punctuation(whisper_segments)
 
-            # 補正されたセグメントを返す
+            # 補正されたセグメントを返す（タイミングはWhisperのものを使用）
             final_segments = []
             for i, corrected in enumerate(corrected_segments):
-                original_text = whisper_segments[i]["text"]
-                corrected_text = corrected["text"]
-
-                original_start = whisper_segments[i]["start"]
-                original_end = whisper_segments[i]["end"]
-                corrected_start = corrected["start"]
-                corrected_end = corrected["end"]
-
-                duration = corrected_end - corrected_start
+                # Whisperのタイミング情報を使用（音声と完全に同期）
+                whisper_seg = whisper_segments[i]
+                original_text = whisper_seg["text"]
+                original_start = whisper_seg["start"]
+                original_end = whisper_seg["end"]
                 original_duration = original_end - original_start
+
+                # AI補正されたテキストを取得
+                corrected_text = corrected["text"]
 
                 # 次のセグメントの開始時間を取得（タイミング延長の判定用）
                 next_start = whisper_segments[i + 1]["start"] if i + 1 < len(whisper_segments) else None
@@ -537,21 +537,17 @@ Whisperセグメント0: 0-4秒「にほんぎんこうがせいさくきんり�
 
                 # タイミング情報を詳細にログ出力（特に前半10個）
                 if i < 10:
-                    timing_extended = corrected_end > original_end
                     timing_info = f"[TIMING] Segment {i}:"
-                    timing_info += f"\n  Original: {original_start:.2f}s - {original_end:.2f}s (duration: {original_duration:.2f}s)"
-                    timing_info += f"\n  Corrected: {corrected_start:.2f}s - {corrected_end:.2f}s (duration: {duration:.2f}s)"
+                    timing_info += f"\n  Whisper timing: {original_start:.2f}s - {original_end:.2f}s (duration: {original_duration:.2f}s)"
                     if next_start:
                         timing_info += f"\n  Next segment starts at: {next_start:.2f}s"
-                    if timing_extended:
-                        extension = corrected_end - original_end
-                        timing_info += f"\n  ⚠️ EXTENDED by {extension:.2f}s"
-                    timing_info += f"\n  Text ({len(corrected_text)} chars): '{corrected_text[:50]}...'"
+                    timing_info += f"\n  Corrected text ({len(corrected_text)} chars): '{corrected_text[:50]}...'"
                     logger.info(timing_info)
 
+                # Whisperのタイミングをそのまま使用（タイミングズレを防ぐ）
                 final_segments.append({
-                    "start": corrected_start,
-                    "end": corrected_end,
+                    "start": original_start,
+                    "end": original_end,
                     "text": corrected_text
                 })
 

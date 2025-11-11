@@ -23,6 +23,7 @@ news:
 
   # ニュースソース（優先順位順）
   sources:
+    - "openai"  # OpenAI Web Search（最優先、本文が充実）
     - "rss"  # RSSフィード
     - "newsapi"  # NewsAPI
 
@@ -43,6 +44,21 @@ news:
     # - techovedas.com (https://techovedas.com/) - RSS未対応
     # - MarketScreener (https://www.marketscreener.com/) - RSS未対応
     # - Bloomberg Intelligence (https://www.bloomberg.com/professional/product/bloomberg-intelligence/)
+
+  # OpenAI Web Search設定
+  openai:
+    # 取得する記事数
+    max_articles: 20
+    # 検索トピック（Noneの場合はデフォルトトピックを使用）
+    topics:
+      - "株式市場"
+      - "金融政策"
+      - "中央銀行"
+      - "経済指標"
+      - "企業決算"
+      - "テクノロジー"
+      - "半導体"
+      - "AI"
 
   # RSS取得タイムアウト（秒）
   rss_timeout: 10

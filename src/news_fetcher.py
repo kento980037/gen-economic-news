@@ -1,6 +1,6 @@
 """
 経済ニュース取得モジュール
-RSSフィードとNewsAPIから最新の経済ニュースを取得
+RSSフィード、NewsAPI、OpenAI Web Searchから最新の経済ニュースを取得
 """
 
 import os
@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 import pytz
 import numpy as np
 from openai import OpenAI
+from openai_news_fetcher import OpenAINewsFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,13 @@ class NewsFetcher:
             self.openai_client = None
             logger.warning("OPENAI_API_KEY not set, embedding-based similarity disabled")
 
+        # OpenAI Web Search用のフェッチャー
+        try:
+            self.openai_news_fetcher = OpenAINewsFetcher(api_key=self.openai_api_key)
+        except Exception as e:
+            logger.warning(f"OpenAINewsFetcher initialization failed: {e}")
+            self.openai_news_fetcher = None
+
         # 埋め込みベクトルのキャッシュ
         self.embedding_cache = {}
 
@@ -99,6 +107,11 @@ class NewsFetcher:
         """
         articles = []
         sources = self.config.get("sources", ["rss"])
+
+        if "openai" in sources and self.openai_news_fetcher:
+            logger.info("Fetching news from OpenAI Web Search...")
+            openai_articles = self._fetch_from_openai()
+            articles.extend(openai_articles)
 
         if "rss" in sources:
             logger.info("Fetching news from RSS feeds...")
@@ -237,6 +250,46 @@ class NewsFetcher:
 
         except Exception as e:
             logger.error(f"Error fetching from NewsAPI: {e}")
+
+        return articles
+
+    def _fetch_from_openai(self) -> List[NewsArticle]:
+        """OpenAI Web Searchからニュースを取得"""
+        articles = []
+
+        if not self.openai_news_fetcher:
+            logger.warning("OpenAINewsFetcher not initialized, skipping OpenAI source")
+            return articles
+
+        try:
+            # OpenAI設定を取得
+            openai_config = self.config.get("openai", {})
+            max_articles = openai_config.get("max_articles", 20)
+            topics = openai_config.get("topics", None)
+
+            # ニュースを取得
+            openai_news = self.openai_news_fetcher.fetch_financial_news(
+                date=None,  # 今日
+                max_articles=max_articles,
+                topics=topics
+            )
+
+            # NewsArticleオブジェクトに変換
+            for news in openai_news:
+                article = NewsArticle(
+                    title=news["title"],
+                    summary=news["summary"],
+                    url=news["url"],
+                    published_at=news["published_at"],
+                    source=news["source"],
+                    content=news["content"]
+                )
+                articles.append(article)
+
+            logger.info(f"Fetched {len(articles)} articles from OpenAI Web Search")
+
+        except Exception as e:
+            logger.error(f"Error fetching from OpenAI Web Search: {e}")
 
         return articles
 

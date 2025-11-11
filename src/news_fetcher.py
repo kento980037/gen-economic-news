@@ -650,14 +650,33 @@ class NewsFetcher:
         # 6. スコアでソートして上位を返す
         all_candidates.sort(key=lambda x: x[1], reverse=True)
 
-        if all_candidates:
-            logger.info(f"Total {len(all_candidates)} related articles found (showing top {max_related}):")
-            for article, score, source in all_candidates[:max_related]:
+        # 本文が短すぎる記事を除外（Bloombergの有料記事など）
+        min_content_length = 200  # 最小200文字
+        filtered_candidates = []
+        for article, score, source in all_candidates:
+            content_length = len(article.content or "")
+            if content_length >= min_content_length:
+                filtered_candidates.append((article, score, source))
+            else:
+                logger.debug(
+                    f"Skipping related article with insufficient content ({content_length} chars): "
+                    f"{article.title[:50]}..."
+                )
+
+        if len(all_candidates) > len(filtered_candidates):
+            logger.info(
+                f"Filtered {len(all_candidates) - len(filtered_candidates)} related articles "
+                f"with insufficient content (< {min_content_length} chars)"
+            )
+
+        if filtered_candidates:
+            logger.info(f"Total {len(filtered_candidates)} related articles found (showing top {max_related}):")
+            for article, score, source in filtered_candidates[:max_related]:
                 logger.info(f"  [{source.upper()}] {article.source}: {article.title[:50]}... (score: {score:.3f})")
         else:
             logger.info("No related articles found")
 
-        return [article for article, _, _ in all_candidates[:max_related]]
+        return [article for article, _, _ in filtered_candidates[:max_related]]
 
     def _search_historical_context(self, main_article: NewsArticle, max_results: int = 2) -> List[NewsArticle]:
         """

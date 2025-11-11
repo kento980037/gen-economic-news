@@ -23,9 +23,9 @@ news:
 
   # ニュースソース（優先順位順）
   sources:
-    - "openai"  # OpenAI Web Search（最優先、本文が充実）
-    - "rss"  # RSSフィード
-    - "newsapi"  # NewsAPI
+    - "openai"  # OpenAI（最優先）
+    # - "rss"  # RSSフィード（無効化）
+    # - "newsapi"  # NewsAPI（無効化）
 
   # RSS Feed URLs（テクノロジー・半導体・金融市場に特化）
   rss_feeds:

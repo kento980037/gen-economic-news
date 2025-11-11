@@ -116,8 +116,26 @@ class NewsFetcher:
         # 重複を削除（タイトルが類似しているものを除外）
         unique_articles = self._remove_duplicates(articles)
 
+        # 本文が短すぎる記事を除外（Bloombergの有料記事など）
+        min_content_length = 200  # 最小200文字
+        articles_with_content = []
+        for article in unique_articles:
+            content_length = len(article.content or "")
+            if content_length >= min_content_length:
+                articles_with_content.append(article)
+            else:
+                logger.debug(
+                    f"Skipping article with insufficient content ({content_length} chars): "
+                    f"{article.title[:50]}..."
+                )
+
+        logger.info(
+            f"Filtered {len(unique_articles) - len(articles_with_content)} articles "
+            f"with insufficient content (< {min_content_length} chars)"
+        )
+
         # 指定された数に制限
-        return unique_articles[: self.max_articles]
+        return articles_with_content[: self.max_articles]
 
     def _fetch_from_rss(self) -> List[NewsArticle]:
         """RSSフィードからニュースを取得"""

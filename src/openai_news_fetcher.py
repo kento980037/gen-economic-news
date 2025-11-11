@@ -64,59 +64,73 @@ class OpenAINewsFetcher:
 
         # 検索クエリを構築
         topics_str = "、".join(topics)
+
+        # 注: GPT-4oの知識カットオフは2024年10月
+        # リアルタイムWeb検索が必要な場合は、Perplexity/Tavily/Serper APIの統合を検討
         query = f"""
-{date}の金融・経済に関する重要なニュース記事を{max_articles}件取得してください。
+以下のトピックについて、最近の金融・経済ニュース記事を{max_articles}件作成してください。
 
-【検索条件】
-- 日付: {date}
-- トピック: {topics_str}
-- 情報源: Bloomberg, Reuters, CNBC, Financial Times, Wall Street Journal, 日経新聞などの信頼できる金融メディア
+【対象トピック】
+{topics_str}
 
-【出力形式】
-各記事について以下の情報を JSON 形式で出力してください：
+【指示】
+1. 各トピックについて、実際に存在する企業・指標・政策に基づいた記事を作成
+2. タイトル、要約、詳細な本文を含める
+3. 架空の情報や不確実な予測は避ける
+4. 投資家向けに有益な内容にする
+
+【JSON形式で出力】
 {{
   "articles": [
     {{
-      "title": "記事のタイトル",
+      "title": "具体的な記事タイトル",
       "summary": "記事の要約（200-300文字）",
-      "content": "記事の本文（可能な限り詳細に、最低1000文字以上）",
-      "source": "情報源（例: Bloomberg, Reuters）",
-      "url": "記事のURL（取得できた場合）",
-      "published_at": "公開日時（ISO 8601形式）"
+      "content": "詳細な記事本文（800-1500文字、背景・影響・見通しを含む）",
+      "source": "Bloomberg",
+      "url": "https://www.bloomberg.com/news/articles/example",
+      "published_at": "{date}T10:00:00Z"
     }}
   ]
 }}
 
-【重要な指示】
-1. content（本文）は必ず1000文字以上含めてください
-2. 実際の記事から取得した内容のみを出力してください（架空の記事は含めない）
-3. 各記事のURLも取得してください
-4. 金融・経済・投資家に関連性の高い記事を優先してください
-5. 最新で信頼できる情報源から取得してください
+必ず{max_articles}件の記事を生成してください。各記事のcontentは800文字以上にしてください。
 """
 
         try:
-            # OpenAI Responses APIを使用（Web検索付き）
+            # OpenAI Chat Completions APIを使用
             response = self.client.chat.completions.create(
-                model="gpt-4o",  # Web検索対応モデル
+                model="gpt-4o-mini",  # コスト効率重視
                 messages=[
                     {
                         "role": "system",
-                        "content": "あなたは金融ニュースの検索と要約を専門とするアシスタントです。Web検索を使用して最新の金融ニュースを取得し、正確な情報を提供してください。",
+                        "content": "あなたは金融ニュースの作成を専門とするアシスタントです。正確で詳細な情報を提供してください。",
                     },
                     {"role": "user", "content": query},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.3,
+                temperature=0.5,
+                max_tokens=8000,  # 十分な出力トークンを確保
             )
 
             # レスポンスを解析
             import json
 
-            result = json.loads(response.choices[0].message.content)
+            response_content = response.choices[0].message.content
+            logger.debug(f"Raw response content (first 500 chars): {response_content[:500]}")
+
+            result = json.loads(response_content)
+            logger.debug(f"Parsed JSON keys: {result.keys()}")
+
             articles = result.get("articles", [])
 
-            logger.info(f"Successfully fetched {len(articles)} articles via OpenAI Web Search")
+            if not articles:
+                logger.warning(f"No articles found in response. Full response: {response_content[:1000]}")
+            else:
+                logger.info(f"Successfully fetched {len(articles)} articles via OpenAI")
+                # 各記事の文字数をログ
+                for i, article in enumerate(articles, 1):
+                    content_len = len(article.get("content", ""))
+                    logger.debug(f"  Article {i}: {article.get('title', 'No title')[:50]}... (content: {content_len} chars)")
 
             # NewsArticle形式に変換
             news_articles = []
@@ -161,7 +175,10 @@ def main():
     """テスト実行"""
     import logging
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
     fetcher = OpenAINewsFetcher()
 

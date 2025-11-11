@@ -47,8 +47,8 @@ news:
 
   # OpenAI Web Search設定
   openai:
-    # 取得する記事数
-    max_articles: 20
+    # 取得する記事数（5-10件が推奨、GPTの出力制限を考慮）
+    max_articles: 5
     # 検索トピック（Noneの場合はデフォルトトピックを使用）
     topics:
       - "株式市場"

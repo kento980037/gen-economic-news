@@ -574,24 +574,24 @@ class NewsFetcher:
         articles = self.fetch_news()
         return articles[0] if articles else None
 
-    def get_related_articles(self, main_article: NewsArticle, max_related: int = 3) -> List[NewsArticle]:
+    def get_related_articles(self, main_article: NewsArticle, max_related: int = 10) -> List[NewsArticle]:
         """
         メイン記事に関連する記事・コンテキスト情報を取得（情報の厚みを作る）
 
         【目的】台本作成の情報を充実させる
         1. OpenAI APIでメイン記事から「深掘りすべきキーワード」を抽出
-        2. 各キーワードについて個別にNewsAPIで検索（補足情報を取得）
+        2. 各キーワードについて個別にOpenAI APIで検索（補足情報を取得）
         3. 既存のキャッシュ記事からも類似記事を探す
-        4. 過去の関連記事を検索（時系列比較用）
+        4. OpenAI APIで動的に関連記事を生成
 
         Args:
             main_article: メイン記事
-            max_related: 取得する関連記事の最大数
+            max_related: 取得する関連記事の最大数（デフォルト10件）
 
         Returns:
             関連記事のリスト
         """
-        logger.info(f"Finding related articles for: {main_article.title[:50]}...")
+        logger.info(f"Finding {max_related} related articles for: {main_article.title[:50]}...")
 
         all_candidates = []
 
@@ -604,7 +604,7 @@ class NewsFetcher:
         # より多くのキーワードで検索（3 → 5）
         for keyword in deep_dive_keywords[:5]:  # 上位5つのキーワードで検索
             logger.info(f"  Searching for deep-dive topic: {keyword}")
-            topic_articles = self._search_by_specific_topic(keyword, max_results=4)
+            topic_articles = self._search_by_specific_topic(keyword, max_results=3)
 
             # 重複を除外しながら追加
             existing_urls = {a.url for a, _, _ in all_candidates} | {main_article.url}
@@ -614,11 +614,11 @@ class NewsFetcher:
                     all_candidates.append((article, 0.9, "deep-dive"))
                     existing_urls.add(article.url)
 
-        # 2. NewsAPIで動的に検索（補完的）
-        logger.info("Step 2: Dynamic search via NewsAPI")
-        # より多くの記事を取得（max_related * 3で十分な候補を確保）
+        # 2. OpenAI APIで動的に検索（補完的）
+        logger.info("Step 2: Dynamic search via OpenAI")
+        # より多くの記事を取得（max_related件を直接取得）
         dynamic_articles = self._search_related_articles_dynamic(
-            main_article, max_results=max_related * 3
+            main_article, max_results=max_related
         )
 
         # メイン記事のテキストと埋め込みベクトルを取得
@@ -734,6 +734,7 @@ class NewsFetcher:
     def _search_historical_context(self, main_article: NewsArticle, max_results: int = 2) -> List[NewsArticle]:
         """
         過去の関連記事を検索（時系列比較用）
+        注: OpenAI APIは過去の記事検索に対応していないため、このメソッドはスキップされます
 
         【検索戦略】
         - 決算記事 → 前四半期・前年同期の決算
@@ -752,74 +753,9 @@ class NewsFetcher:
             logger.info("Historical search is disabled in config")
             return []
 
-        if not self.news_api_key:
-            logger.info("NEWS_API_KEY not set, skipping historical search")
-            return []
-
-        try:
-            # キーワード抽出
-            keywords = self._extract_keywords(main_article.title)
-            sorted_keywords = sorted(keywords, key=len, reverse=True)[:3]
-
-            if not sorted_keywords:
-                return []
-
-            query = " AND ".join(sorted_keywords)
-
-            # 設定から期間を取得（デフォルト：過去7〜90日前）
-            # 最小年齢を7日に短縮（30日 → 7日）してより新しい過去記事も取得
-            min_age_days = min(7, self.historical_min_age_days)
-            from_date = (datetime.now(pytz.UTC) - timedelta(days=self.historical_range_days)).isoformat()
-            to_date = (datetime.now(pytz.UTC) - timedelta(days=min_age_days)).isoformat()
-
-            params = {
-                "apiKey": self.news_api_key,
-                "q": query,
-                "language": "ja",
-                "sortBy": "relevancy",
-                "pageSize": max_results,
-                "from": from_date,
-                "to": to_date,
-            }
-
-            response = requests.get(
-                "https://newsapi.org/v2/everything",
-                params=params,
-                timeout=self.config.get("rss_timeout", 10)
-            )
-
-            if response.status_code != 200:
-                logger.warning(f"NewsAPI historical search failed: {response.status_code}")
-                return []
-
-            data = response.json()
-            articles = []
-
-            for item in data.get("articles", [])[:max_results]:
-                published_at = self._parse_datetime(item.get("publishedAt"))
-                if not published_at:
-                    continue
-
-                article = NewsArticle(
-                    title=item.get("title", ""),
-                    summary=item.get("description", ""),
-                    url=item.get("url", ""),
-                    published_at=published_at,
-                    source=item.get("source", {}).get("name", "NewsAPI"),
-                    content=item.get("content", ""),
-                )
-                articles.append(article)
-
-            if articles:
-                logger.info(f"Found {len(articles)} historical articles (1-3 months ago)")
-                for article in articles:
-                    logger.info(f"  [HISTORICAL] {article.published_at.date()}: {article.title[:50]}...")
-
-            return articles
-
-        except Exception as e:
-            logger.warning(f"Failed to search historical articles: {e}")
-            return []
+        # OpenAI APIでは過去の記事検索は困難なため、スキップ
+        logger.info("Historical search is not supported with OpenAI API, skipping")
+        return []
 
     def _search_web_context(self, main_article: NewsArticle, max_results: int = 2) -> List[NewsArticle]:
         """
@@ -1099,7 +1035,7 @@ CPI（消費者物価指数）
 
     def _search_by_specific_topic(self, topic: str, max_results: int = 3) -> List[NewsArticle]:
         """
-        特定のトピックについてNewsAPIで検索
+        特定のトピックについてOpenAI APIで検索
 
         Args:
             topic: 検索するトピック（例：「NVIDIA」「量的緩和」）
@@ -1108,60 +1044,44 @@ CPI（消費者物価指数）
         Returns:
             検索された記事のリスト
         """
-        if not self.news_api_key:
-            logger.debug(f"NEWS_API_KEY not set, skipping topic search for: {topic}")
+        if not self.openai_news_fetcher:
+            logger.debug(f"OpenAINewsFetcher not available, skipping topic search for: {topic}")
             return []
 
         try:
-            # NewsAPI エンドポイント
-            url = "https://newsapi.org/v2/everything"
+            # OpenAI APIで関連記事を検索
+            openai_articles = self.openai_news_fetcher.search_related_articles(
+                main_article_title=f"{topic}に関するニュース",
+                main_article_summary=f"{topic}についての最新情報",
+                keywords=[topic],
+                max_articles=max_results,
+            )
 
-            # クエリパラメータ
-            params = {
-                "apiKey": self.news_api_key,
-                "q": topic,  # 特定トピックで検索
-                "language": "ja",
-                "sortBy": "relevancy",
-                "pageSize": max_results,
-                "from": (datetime.now() - timedelta(days=30)).isoformat(),  # 30日間
-            }
-
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get("status") != "ok":
-                logger.warning(f"NewsAPI error for topic '{topic}': {data.get('message')}")
-                return []
-
+            # NewsArticleオブジェクトに変換
             articles = []
-            for item in data.get("articles", []):
-                published_at = self._parse_datetime(item.get("publishedAt"))
-                if not published_at:
-                    continue
-
+            for article_dict in openai_articles:
                 article = NewsArticle(
-                    title=item.get("title", ""),
-                    summary=item.get("description", ""),
-                    url=item.get("url", ""),
-                    published_at=published_at,
-                    source=item.get("source", {}).get("name", "NewsAPI"),
-                    content=item.get("content", ""),
+                    title=article_dict["title"],
+                    summary=article_dict["summary"],
+                    url=article_dict["url"],
+                    published_at=article_dict["published_at"],
+                    source=article_dict["source"],
+                    content=article_dict["content"],
                 )
                 articles.append(article)
 
-            logger.debug(f"Found {len(articles)} articles for topic: {topic}")
+            logger.debug(f"Found {len(articles)} articles for topic: {topic} via OpenAI")
             return articles
 
         except Exception as e:
-            logger.warning(f"Error searching for topic '{topic}': {e}")
+            logger.warning(f"Error searching for topic '{topic}' via OpenAI: {e}")
             return []
 
     def _search_related_articles_dynamic(
         self, main_article: NewsArticle, max_results: int = 5
     ) -> List[NewsArticle]:
         """
-        メイン記事に関連する記事をNewsAPIで動的に検索
+        メイン記事に関連する記事をOpenAI APIで動的に検索
 
         Args:
             main_article: メイン記事
@@ -1170,8 +1090,8 @@ CPI（消費者物価指数）
         Returns:
             検索された関連記事のリスト
         """
-        if not self.news_api_key:
-            logger.info("NEWS_API_KEY not set, skipping dynamic search")
+        if not self.openai_news_fetcher:
+            logger.info("OpenAINewsFetcher not available, skipping dynamic search")
             return []
 
         try:
@@ -1179,69 +1099,45 @@ CPI（消費者物価指数）
             main_text = f"{main_article.title} {main_article.summary}"
             keywords = self._extract_keywords(main_text)
 
-            # キーワードを上位5つに絞る（長すぎるクエリを避ける）
-            # 長い単語（より具体的）を優先
+            # キーワードを上位5つに絞る
             sorted_keywords = sorted(keywords, key=len, reverse=True)[:5]
 
             if not sorted_keywords:
                 logger.warning("No keywords extracted from main article")
                 return []
 
-            # 検索クエリを構築
-            query = " OR ".join(sorted_keywords)
+            logger.info(f"Searching related articles with keywords: {', '.join(list(sorted_keywords)[:3])}...")
 
-            logger.info(f"Searching NewsAPI with query: {query}")
+            # OpenAI APIで関連記事を検索
+            openai_articles = self.openai_news_fetcher.search_related_articles(
+                main_article_title=main_article.title,
+                main_article_summary=main_article.summary,
+                keywords=list(sorted_keywords),
+                max_articles=max_results,
+            )
 
-            # NewsAPI エンドポイント
-            url = "https://newsapi.org/v2/everything"
-
-            # クエリパラメータ
-            # 関連記事検索では時間範囲を拡大（7日間）して、より多くの記事を取得
-            params = {
-                "apiKey": self.news_api_key,
-                "q": query,
-                "language": "ja",
-                "sortBy": "relevancy",  # 関連度順にソート
-                "pageSize": max_results * 2,  # 多めに取得してフィルタ
-                "from": (
-                    datetime.now() - timedelta(days=7)  # 7日間に拡大（24時間 → 7日間）
-                ).isoformat(),
-            }
-
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get("status") != "ok":
-                logger.error(f"NewsAPI error: {data.get('message')}")
-                return []
-
+            # NewsArticleオブジェクトに変換
             articles = []
-            for item in data.get("articles", []):
-                # メイン記事と同じURLはスキップ
-                if item.get("url") == main_article.url:
-                    continue
-
-                # 記事を作成
-                published_at = self._parse_datetime(item.get("publishedAt"))
-                if not published_at:
+            for article_dict in openai_articles:
+                # メイン記事と同じタイトルはスキップ
+                if article_dict["title"] == main_article.title:
                     continue
 
                 article = NewsArticle(
-                    title=item.get("title", ""),
-                    summary=item.get("description", ""),
-                    url=item.get("url", ""),
-                    published_at=published_at,
-                    source=item.get("source", {}).get("name", "NewsAPI"),
-                    content=item.get("content", ""),
+                    title=article_dict["title"],
+                    summary=article_dict["summary"],
+                    url=article_dict["url"],
+                    published_at=article_dict["published_at"],
+                    source=article_dict["source"],
+                    content=article_dict["content"],
                 )
                 articles.append(article)
 
-            logger.info(f"Found {len(articles)} related articles via dynamic search")
+            logger.info(f"Found {len(articles)} related articles via OpenAI")
             return articles[:max_results]
 
         except Exception as e:
-            logger.error(f"Error in dynamic article search: {e}")
+            logger.error(f"Error in dynamic article search via OpenAI: {e}")
             return []
 
     def calculate_trending_score(self, article: NewsArticle) -> float:

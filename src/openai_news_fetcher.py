@@ -85,7 +85,7 @@ class OpenAINewsFetcher:
     {{
       "title": "具体的な記事タイトル",
       "summary": "記事の要約（200-300文字）",
-      "content": "詳細な記事本文（800-1500文字、背景・影響・見通しを含む）",
+      "content": "詳細な記事本文（1000-2000文字、背景・影響・見通しを含む）",
       "source": "Bloomberg",
       "url": "https://www.bloomberg.com/news/articles/example",
       "published_at": "{date}T10:00:00Z"
@@ -93,7 +93,7 @@ class OpenAINewsFetcher:
   ]
 }}
 
-必ず{max_articles}件の記事を生成してください。各記事のcontentは800文字以上にしてください。
+必ず{max_articles}件の記事を生成してください。各記事のcontentは1000文字以上にしてください。
 """
 
         try:
@@ -169,6 +169,134 @@ class OpenAINewsFetcher:
             logger.debug(f"Failed to parse datetime: {datetime_str}, error: {e}")
 
         return None
+
+    def search_related_articles(
+        self,
+        main_article_title: str,
+        main_article_summary: str,
+        keywords: List[str],
+        max_articles: int = 5,
+    ) -> List[Dict]:
+        """
+        メイン記事に関連する記事を検索（複数回API呼び出しで多数取得可能）
+
+        Args:
+            main_article_title: メイン記事のタイトル
+            main_article_summary: メイン記事の要約
+            keywords: 検索キーワードのリスト
+            max_articles: 取得する最大記事数
+
+        Returns:
+            関連記事のリスト
+        """
+        all_articles = []
+
+        # 1回のAPI呼び出しで取得する記事数（5件が最適）
+        batch_size = 5
+        num_batches = (max_articles + batch_size - 1) // batch_size  # 切り上げ
+
+        logger.info(f"Fetching {max_articles} related articles in {num_batches} batches (batch_size={batch_size})")
+
+        for batch_num in range(num_batches):
+            articles_to_fetch = min(batch_size, max_articles - len(all_articles))
+
+            if articles_to_fetch <= 0:
+                break
+
+            logger.info(f"  Batch {batch_num + 1}/{num_batches}: Fetching {articles_to_fetch} articles...")
+
+            # バッチごとに異なる視点で記事を生成
+            if batch_num == 0:
+                focus = "メイン記事の背景や関連情報を補足する"
+            elif batch_num == 1:
+                focus = "メイン記事に登場する企業・組織・人物についての詳細情報を提供する"
+            elif batch_num == 2:
+                focus = "メイン記事のトピックに関連する市場動向や投資家への影響を分析する"
+            else:
+                focus = "メイン記事に関連する技術・政策・経済指標についての解説を提供する"
+
+            keywords_str = "、".join(keywords[:5])  # 上位5つのキーワード
+
+            query = f"""
+以下のメイン記事に関連する金融・経済ニュース記事を{articles_to_fetch}件作成してください。
+
+【メイン記事】
+タイトル: {main_article_title}
+要約: {main_article_summary}
+
+【関連キーワード】
+{keywords_str}
+
+【記事作成の視点】
+{focus}
+
+【指示】
+1. 上記の視点から、メイン記事を補完する記事を作成
+2. 実在する企業・指標・政策に基づいた内容にする
+3. 各記事は500-800文字程度の本文を含める
+4. 既に作成された記事とは異なる視点・内容にする
+
+【JSON形式で出力】
+{{
+  "articles": [
+    {{
+      "title": "関連記事のタイトル",
+      "summary": "記事の要約（150-200文字）",
+      "content": "記事本文（500-800文字）",
+      "source": "Bloomberg",
+      "url": "https://www.bloomberg.com/news/articles/example",
+      "published_at": "2025-11-11T10:00:00Z"
+    }}
+  ]
+}}
+
+必ず{articles_to_fetch}件の記事を生成してください。
+"""
+
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "あなたは金融ニュースの関連記事作成を専門とするアシスタントです。メイン記事を補足する有益な情報を提供してください。",
+                        },
+                        {"role": "user", "content": query},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.6,  # 多様性を高めるため少し上げる
+                    max_tokens=6000,
+                )
+
+                import json
+                response_content = response.choices[0].message.content
+                result = json.loads(response_content)
+                articles = result.get("articles", [])
+
+                logger.info(f"    Retrieved {len(articles)} articles in batch {batch_num + 1}")
+
+                # NewsArticle形式に変換
+                for article in articles:
+                    all_articles.append(
+                        {
+                            "title": article.get("title", ""),
+                            "summary": article.get("summary", ""),
+                            "content": article.get("content", ""),
+                            "source": article.get("source", "OpenAI"),
+                            "url": article.get("url", ""),
+                            "published_at": self._parse_datetime(
+                                article.get("published_at", "")
+                            )
+                            or datetime.now(pytz.UTC),
+                        }
+                    )
+
+            except Exception as e:
+                logger.error(f"Error in batch {batch_num + 1}: {e}")
+                continue
+
+        logger.info(f"Total {len(all_articles)} related articles fetched via OpenAI")
+        return all_articles[:max_articles]
 
 
 def main():

@@ -73,6 +73,14 @@ class OpenAINewsFetcher:
 【対象トピック】
 {topics_str}
 
+【参考にすべきスタイル・品質】
+Reuters Markets (https://www.reuters.com/markets/) のような高品質な金融ニュースを参考にしてください：
+- 具体的なデータと数字を重視
+- 市場への影響を明確に説明
+- 専門家のコメントや分析を含める
+- 客観的で正確な報道スタイル
+- 投資家にとって実用的な情報
+
 【重要な注意事項】
 - あなたの知識カットオフは2024年10月です
 - 2024年10月以降の情報については推測しないでください
@@ -82,10 +90,12 @@ class OpenAINewsFetcher:
 - 不確実な情報は含めないでください
 
 【記事作成の指示】
-1. 実際に存在する企業・指標・政策に基づいた記事を作成
-2. タイトル、要約、詳細な本文を含める
-3. 投資家向けに有益な内容にする
-4. 人物を言及する場合は、知識カットオフ時点で正確な情報のみを使用
+1. Reuters Marketsのような具体的で詳細な記事を作成
+2. 実際に存在する企業・指標・政策に基づいた内容
+3. 具体的な数字、パーセンテージ、金額を含める
+4. 市場関係者や専門家の見解を含める（実在する人物の場合のみ）
+5. 投資家向けに実用的で価値のある情報を提供
+6. 人物を言及する場合は、知識カットオフ時点で正確な情報のみを使用
 
 【JSON形式で出力】
 {{
@@ -93,7 +103,11 @@ class OpenAINewsFetcher:
     {{
       "title": "具体的な記事タイトル",
       "summary": "記事の要約（200-300文字）",
-      "content": "詳細な記事本文（1000-2000文字、背景・影響・見通しを含む）",
+      "content": "詳細な記事本文（最低1200文字、理想は1500-2000文字）。必ず以下を含めること：
+        1. 導入・背景（200-300文字）
+        2. 具体的なデータ・数字・事実（400-500文字）
+        3. 専門家の分析・市場の反応（300-400文字）
+        4. 投資家への影響・今後の見通し（300-400文字）",
       "source": "Bloomberg",
       "url": "https://www.bloomberg.com/news/articles/example",
       "published_at": "{date}T10:00:00Z"
@@ -101,7 +115,8 @@ class OpenAINewsFetcher:
   ]
 }}
 
-必ず{max_articles}件の記事を生成してください。各記事のcontentは1000文字以上にしてください。
+【重要】必ず{max_articles}件の記事を生成してください。
+【必須】各記事のcontentは必ず1200文字以上にしてください。1000文字未満は不可です。
 """
 
         try:
@@ -111,13 +126,13 @@ class OpenAINewsFetcher:
                 messages=[
                     {
                         "role": "system",
-                        "content": "あなたは金融ニュースの作成を専門とするアシスタントです。正確で詳細な情報を提供してください。",
+                        "content": "あなたは金融ニュースの作成を専門とするアシスタントです。Reuters Marketsのような高品質で詳細な記事を作成してください。具体的なデータ、数字、専門家の分析を豊富に含めてください。",
                     },
                     {"role": "user", "content": query},
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.5,
-                max_tokens=8000,  # 十分な出力トークンを確保
+                max_tokens=12000,  # 1200文字×5記事に対応
             )
 
             # レスポンスを解析
@@ -186,7 +201,7 @@ class OpenAINewsFetcher:
         max_articles: int = 5,
     ) -> List[Dict]:
         """
-        メイン記事に関連する記事を検索（複数回API呼び出しで多数取得可能）
+        メイン記事に関連する記事を検索（1件ずつ高品質生成）
 
         Args:
             main_article_title: メイン記事のタイトル
@@ -199,34 +214,39 @@ class OpenAINewsFetcher:
         """
         all_articles = []
 
-        # 1回のAPI呼び出しで取得する記事数（5件が最適）
-        batch_size = 5
-        num_batches = (max_articles + batch_size - 1) // batch_size  # 切り上げ
+        # 1記事ずつ生成して品質を最大化
+        batch_size = 1
+        num_batches = max_articles
 
-        logger.info(f"Fetching {max_articles} related articles in {num_batches} batches (batch_size={batch_size})")
+        logger.info(f"Fetching {max_articles} related articles (1 article per API call for maximum quality)")
 
         for batch_num in range(num_batches):
-            articles_to_fetch = min(batch_size, max_articles - len(all_articles))
+            articles_to_fetch = 1  # 常に1件ずつ
 
             if articles_to_fetch <= 0:
                 break
 
-            logger.info(f"  Batch {batch_num + 1}/{num_batches}: Fetching {articles_to_fetch} articles...")
+            logger.info(f"  Article {batch_num + 1}/{num_batches}: Generating high-quality article...")
 
-            # バッチごとに異なる視点で記事を生成
-            if batch_num == 0:
-                focus = "メイン記事の背景や関連情報を補足する"
-            elif batch_num == 1:
-                focus = "メイン記事に登場する企業・組織・人物についての詳細情報を提供する"
-            elif batch_num == 2:
-                focus = "メイン記事のトピックに関連する市場動向や投資家への影響を分析する"
-            else:
-                focus = "メイン記事に関連する技術・政策・経済指標についての解説を提供する"
+            # 記事ごとに異なる視点で生成
+            focus_options = [
+                "メイン記事の背景や歴史的文脈を詳しく解説する",
+                "メイン記事に登場する企業・組織・人物についての深掘り分析を提供する",
+                "メイン記事のトピックに関連する市場動向や投資家への具体的な影響を分析する",
+                "メイン記事に関連する技術・政策・経済指標についての専門的な解説を提供する",
+                "メイン記事の国際的な影響や他国との比較を詳しく分析する",
+                "メイン記事が投資戦略に与える影響と具体的なアクションを提案する",
+                "メイン記事の長期的なトレンドと今後の展開を予測分析する",
+                "メイン記事に関連するリスク要因と対策を詳しく解説する",
+                "メイン記事のセクター・業界への影響を深掘りする",
+                "メイン記事の経済理論・学術的背景を解説する"
+            ]
+            focus = focus_options[batch_num % len(focus_options)]
 
             keywords_str = "、".join(keywords[:5])  # 上位5つのキーワード
 
             query = f"""
-以下のメイン記事に関連する金融・経済ニュース記事を{articles_to_fetch}件作成してください。
+以下のメイン記事に関連する金融・経済ニュース記事を1件作成してください。
 
 【メイン記事】
 タイトル: {main_article_title}
@@ -238,6 +258,14 @@ class OpenAINewsFetcher:
 【記事作成の視点】
 {focus}
 
+【参考にすべきスタイル・品質】
+Reuters Markets (https://www.reuters.com/markets/) のような高品質な金融ニュースを参考にしてください：
+- 具体的なデータと数字を重視
+- 市場への影響を明確に説明
+- 専門家のコメントや分析を含める
+- 客観的で正確な報道スタイル
+- 投資家にとって実用的な情報
+
 【重要な注意事項】
 - あなたの知識カットオフは2024年10月です
 - 人事・役職については知識カットオフ時点の最新情報を使用してください
@@ -246,19 +274,25 @@ class OpenAINewsFetcher:
 - 不確実な情報は含めないでください
 
 【記事作成の指示】
-1. 上記の視点から、メイン記事を補完する記事を作成
-2. 実在する企業・指標・政策に基づいた内容にする
-3. 各記事は500-800文字程度の本文を含める
-4. 既に作成された記事とは異なる視点・内容にする
-5. 人物を言及する場合は、現在の正しい役職を使用する
+1. Reuters Marketsのような具体的で詳細な関連記事を1件作成
+2. 上記の視点から、メイン記事を補完する内容にする
+3. 実在する企業・指標・政策に基づいた内容
+4. 具体的な数字、パーセンテージ、金額を豊富に含める
+5. 本文は1000-1500文字を目標とする（800文字未満は不可）
+6. 人物を言及する場合は、現在の正しい役職を使用する
+7. 全トークンを使って、徹底的に深掘りした記事を作成する
 
 【JSON形式で出力】
 {{
   "articles": [
     {{
-      "title": "関連記事のタイトル",
-      "summary": "記事の要約（150-200文字）",
-      "content": "記事本文（500-800文字）",
+      "title": "関連記事のタイトル（具体的で魅力的に）",
+      "summary": "記事の要約（200-250文字、詳細に）",
+      "content": "記事本文（1000-1500文字を目標）。必ず以下の構成で：
+        1. 導入・背景（200-250文字）- なぜこのトピックが重要か
+        2. 具体的なデータ・数字・事実（400-500文字）- 詳細な統計や事例
+        3. 専門家の分析・市場の反応（250-350文字）- 深い洞察
+        4. 投資家への影響・今後の見通し（200-300文字）- 実践的なアドバイス",
       "source": "Bloomberg",
       "url": "https://www.bloomberg.com/news/articles/example",
       "published_at": "2025-11-11T10:00:00Z"
@@ -266,7 +300,7 @@ class OpenAINewsFetcher:
   ]
 }}
 
-必ず{articles_to_fetch}件の記事を生成してください。
+【最重要】この1件の記事に全力を注いでください。contentは1000文字以上必須です。
 """
 
             try:
@@ -275,13 +309,13 @@ class OpenAINewsFetcher:
                     messages=[
                         {
                             "role": "system",
-                            "content": "あなたは金融ニュースの関連記事作成を専門とするアシスタントです。メイン記事を補足する有益な情報を提供してください。",
+                            "content": "あなたは金融ニュースの関連記事作成を専門とするアシスタントです。Reuters Marketsのような高品質で詳細な記事を作成し、メイン記事を補足する有益な情報を提供してください。具体的なデータと分析を豊富に含めてください。",
                         },
                         {"role": "user", "content": query},
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.6,  # 多様性を高めるため少し上げる
-                    max_tokens=6000,
+                    max_tokens=8000,  # 800-1200文字×5記事に対応
                 )
 
                 import json
@@ -289,7 +323,11 @@ class OpenAINewsFetcher:
                 result = json.loads(response_content)
                 articles = result.get("articles", [])
 
-                logger.info(f"    Retrieved {len(articles)} articles in batch {batch_num + 1}")
+                if articles:
+                    content_length = len(articles[0].get("content", ""))
+                    logger.info(f"    Generated article {batch_num + 1}: {articles[0].get('title', 'No title')[:50]}... ({content_length} chars)")
+                else:
+                    logger.warning(f"    No article generated in batch {batch_num + 1}")
 
                 # NewsArticle形式に変換
                 for article in articles:

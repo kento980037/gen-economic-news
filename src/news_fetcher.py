@@ -576,13 +576,7 @@ class NewsFetcher:
 
     def get_related_articles(self, main_article: NewsArticle, max_related: int = 10) -> List[NewsArticle]:
         """
-        メイン記事に関連する記事・コンテキスト情報を取得（情報の厚みを作る）
-
-        【目的】台本作成の情報を充実させる
-        1. OpenAI APIでメイン記事から「深掘りすべきキーワード」を抽出
-        2. 各キーワードについて個別にOpenAI APIで検索（補足情報を取得）
-        3. 既存のキャッシュ記事からも類似記事を探す
-        4. OpenAI APIで動的に関連記事を生成
+        メイン記事に関連する記事を取得（OpenAI生成、実際のURLを使用）
 
         Args:
             main_article: メイン記事
@@ -593,195 +587,68 @@ class NewsFetcher:
         """
         logger.info(f"Finding {max_related} related articles for: {main_article.title[:50]}...")
 
-        all_candidates = []
-
-        # 0. OpenAI APIで深掘りすべきキーワードを抽出
-        logger.info("Step 0: Extracting deep-dive keywords via OpenAI")
-        deep_dive_keywords = self._extract_deep_dive_keywords(main_article)
-
-        # 1. 深掘りキーワードで個別に検索（最優先）
-        logger.info("Step 1: Searching for deep-dive topics")
-        # より多くのキーワードで検索（3 → 5）
-        for keyword in deep_dive_keywords[:5]:  # 上位5つのキーワードで検索
-            logger.info(f"  Searching for deep-dive topic: {keyword}")
-            topic_articles = self._search_by_specific_topic(keyword, max_results=3)
-
-            # 重複を除外しながら追加
-            existing_urls = {a.url for a, _, _ in all_candidates} | {main_article.url}
-            for article in topic_articles:
-                if article.url not in existing_urls:
-                    # 深掘り記事には高いスコアを付与
-                    all_candidates.append((article, 0.9, "deep-dive"))
-                    existing_urls.add(article.url)
-
-        # 2. OpenAI APIで動的に検索（補完的）
-        logger.info("Step 2: Dynamic search via OpenAI")
-        # より多くの記事を取得（max_related件を直接取得）
-        dynamic_articles = self._search_related_articles_dynamic(
-            main_article, max_results=max_related
-        )
-
-        # メイン記事のテキストと埋め込みベクトルを取得
-        main_text = f"{main_article.title} {main_article.summary}"
-        main_embedding = self._get_embedding(main_text)
-        main_keywords = self._extract_keywords(main_article.title)
-
-        # 動的検索結果をスコアリング
-        if dynamic_articles:
-            logger.info(f"Found {len(dynamic_articles)} articles via dynamic search")
-
-            if main_embedding is not None:
-                # 埋め込みベクトルで類似度を計算
-                article_texts = [f"{a.title} {a.summary}" for a in dynamic_articles]
-                article_embeddings = self._get_embeddings_batch(article_texts)
-
-                for i, article in enumerate(dynamic_articles):
-                    article_embedding = article_embeddings[i] if i < len(article_embeddings) else None
-
-                    if article_embedding is not None:
-                        relevance_score = self._cosine_similarity(main_embedding, article_embedding)
-                        # 動的検索結果には0.1のボーナスを付与（優先度を上げる）
-                        relevance_score += 0.1
-                        all_candidates.append((article, relevance_score, "dynamic"))
-                        logger.debug(f"  [Dynamic] {article.title[:50]}... similarity: {relevance_score:.3f}")
-
-        # 3. キャッシュされた記事からも検索（補完的）
-        logger.info("Step 3: Searching cached articles")
-        if self._cached_articles is not None:
-            cached_articles = self._cached_articles
-        else:
-            cached_articles = []
-
-        if cached_articles and main_embedding is not None:
-            # 既にある記事は除外
-            existing_urls = {main_article.url} | {a.url for a, _, _ in all_candidates}
-            candidate_articles = [
-                a for a in cached_articles
-                if a.url not in existing_urls and a.title != main_article.title
-            ]
-
-            if candidate_articles:
-                # 最大10記事に制限（情報ソース拡張）
-                candidate_articles = candidate_articles[:10]
-                article_texts = [f"{a.title} {a.summary}" for a in candidate_articles]
-                article_embeddings = self._get_embeddings_batch(article_texts)
-
-                for i, article in enumerate(candidate_articles):
-                    article_embedding = article_embeddings[i] if i < len(article_embeddings) else None
-
-                    if article_embedding is not None:
-                        relevance_score = self._cosine_similarity(main_embedding, article_embedding)
-                        # 閾値チェック（キャッシュ記事は閾値0.3以上に緩和：より多くの関連記事を取得）
-                        if relevance_score > 0.3:
-                            all_candidates.append((article, relevance_score, "cached"))
-                            logger.debug(f"  [Cached] {article.title[:50]}... similarity: {relevance_score:.3f}")
-
-        # 4. 過去の関連記事を検索（時系列比較用）
-        logger.info("Step 4: Searching historical articles for context")
-        # より多くの過去記事を取得（時系列比較のため）
-        historical_articles = self._search_historical_context(main_article, max_results=8)
-
-        if historical_articles and main_embedding is not None:
-            article_texts = [f"{a.title} {a.summary}" for a in historical_articles]
-            article_embeddings = self._get_embeddings_batch(article_texts)
-
-            for i, article in enumerate(historical_articles):
-                article_embedding = article_embeddings[i] if i < len(article_embeddings) else None
-
-                if article_embedding is not None:
-                    relevance_score = self._cosine_similarity(main_embedding, article_embedding)
-                    # 過去記事には0.05のボーナス（情報の厚み重視）
-                    relevance_score += 0.05
-                    all_candidates.append((article, relevance_score, "historical"))
-                    logger.debug(f"  [Historical] {article.title[:50]}... similarity: {relevance_score:.3f}")
-
-        # 5. Web検索（将来実装）
-        # logger.info("Step 5: Searching web for additional context")
-        # web_articles = self._search_web_context(main_article, max_results=1)
-        # （省略）
-
-        # 6. スコアでソートして上位を返す
-        all_candidates.sort(key=lambda x: x[1], reverse=True)
-
-        # 本文が短すぎる記事を除外（Bloombergの有料記事など）
-        min_content_length = 200  # 最小200文字
-        filtered_candidates = []
-        for article, score, source in all_candidates:
-            content_length = len(article.content or "")
-            if content_length >= min_content_length:
-                filtered_candidates.append((article, score, source))
-            else:
-                logger.debug(
-                    f"Skipping related article with insufficient content ({content_length} chars): "
-                    f"{article.title[:50]}..."
-                )
-
-        if len(all_candidates) > len(filtered_candidates):
-            logger.info(
-                f"Filtered {len(all_candidates) - len(filtered_candidates)} related articles "
-                f"with insufficient content (< {min_content_length} chars)"
-            )
-
-        if filtered_candidates:
-            logger.info(f"Total {len(filtered_candidates)} related articles found (showing top {max_related}):")
-            for article, score, source in filtered_candidates[:max_related]:
-                logger.info(f"  [{source.upper()}] {article.source}: {article.title[:50]}... (score: {score:.3f})")
-        else:
-            logger.info("No related articles found")
-
-        return [article for article, _, _ in filtered_candidates[:max_related]]
-
-    def _search_historical_context(self, main_article: NewsArticle, max_results: int = 2) -> List[NewsArticle]:
-        """
-        過去の関連記事を検索（時系列比較用）
-        注: OpenAI APIは過去の記事検索に対応していないため、このメソッドはスキップされます
-
-        【検索戦略】
-        - 決算記事 → 前四半期・前年同期の決算
-        - 政策変更 → 過去の同様の政策
-        - 市場変動 → 過去の類似パターン
-
-        Args:
-            main_article: メイン記事
-            max_results: 取得する最大数
-
-        Returns:
-            過去の関連記事リスト
-        """
-        # 設定で無効化されている場合はスキップ
-        if not self.search_historical:
-            logger.info("Historical search is disabled in config")
+        if not self.openai_news_fetcher:
+            logger.warning("OpenAINewsFetcher not available, returning empty list")
             return []
 
-        # OpenAI APIでは過去の記事検索は困難なため、スキップ
-        logger.info("Historical search is not supported with OpenAI API, skipping")
-        return []
+        try:
+            # OpenAI APIを使って重要キーワードを抽出
+            keywords = self._extract_important_keywords(main_article, max_keywords=5)
 
-    def _search_web_context(self, main_article: NewsArticle, max_results: int = 2) -> List[NewsArticle]:
-        """
-        Web検索で追加コンテキストを取得（ニュース以外も含む）
+            if not keywords:
+                logger.warning("No keywords extracted from main article")
+                return []
 
-        【検索対象】
-        - 企業のIRページ
-        - 公式発表
-        - アナリストレポート
-        - 専門サイトの解説記事
+            logger.info(f"Searching with keywords: {', '.join(keywords[:3])}...")
 
-        Args:
-            main_article: メイン記事
-            max_results: 取得する最大数
+            # OpenAI APIで関連記事を検索（実際のURLを含むプロンプト使用）
+            openai_articles = self.openai_news_fetcher.search_related_articles(
+                main_article_title=main_article.title,
+                main_article_summary=main_article.summary,
+                keywords=keywords,
+                max_articles=max_related,
+            )
 
-        Returns:
-            Web検索結果のリスト
-        """
-        # TODO: 将来的にGoogle Custom Search APIやBing Search APIを実装
-        # 現在はNewsAPIのみなのでスキップ
-        logger.info("Web search not yet implemented, skipping")
-        return []
+            # NewsArticleオブジェクトに変換
+            articles = []
+            for article_dict in openai_articles:
+                # メイン記事と同じタイトルはスキップ
+                if article_dict["title"] == main_article.title:
+                    continue
+
+                # 本文が短すぎる記事を除外（200文字未満）
+                content_length = len(article_dict.get("content", ""))
+                if content_length < 200:
+                    logger.debug(f"Skipping article with insufficient content ({content_length} chars): {article_dict['title'][:50]}...")
+                    continue
+
+                article = NewsArticle(
+                    title=article_dict["title"],
+                    summary=article_dict["summary"],
+                    url=article_dict["url"],
+                    published_at=article_dict["published_at"],
+                    source=article_dict["source"],
+                    content=article_dict["content"],
+                )
+                articles.append(article)
+
+            # 上位max_related件のみ返す
+            articles = articles[:max_related]
+
+            logger.info(f"Found {len(articles)} related articles:")
+            for article in articles:
+                logger.info(f"  - {article.source}: {article.title[:60]}...")
+
+            return articles
+
+        except Exception as e:
+            logger.error(f"Error searching related articles: {e}")
+            return []
+
 
     def _extract_keywords(self, text: str) -> set:
         """
-        テキストからキーワードを抽出
+        テキストからキーワードを抽出（後方互換性のため残す・シンプル版）
 
         Args:
             text: 対象テキスト
@@ -804,6 +671,116 @@ class NewsFetcher:
         keywords = {word for word in words if word not in stopwords and len(word) > 2}
 
         return keywords
+
+    def _extract_important_keywords(self, main_article: NewsArticle, max_keywords: int = 5) -> List[str]:
+        """
+        OpenAI APIを使ってメイン記事から「情報を補足すべき重要キーワード」を抽出
+
+        【目的】
+        関連記事検索のため、メイン記事で言及されているが詳細が不足している
+        重要な要素を特定し、それらについて補足情報を集める
+
+        Args:
+            main_article: メイン記事
+            max_keywords: 抽出する最大キーワード数
+
+        Returns:
+            重要キーワードのリスト（重要度順）
+        """
+        if not self.openai_client:
+            logger.warning("OpenAI client not available, falling back to simple extraction")
+            # フォールバック: 簡易抽出
+            text = f"{main_article.title} {main_article.summary}"
+            keywords = self._extract_keywords(text)
+            return sorted(keywords, key=len, reverse=True)[:max_keywords]
+
+        try:
+            logger.info("Extracting important keywords via OpenAI...")
+
+            # 本文があれば使用、なければ要約を使用
+            article_content = main_article.content if main_article.content and len(main_article.content) > 100 else main_article.summary
+
+            prompt = f"""以下の金融ニュース記事を分析し、「情報を補足すべき重要キーワード」を{max_keywords}個抽出してください。
+
+【記事情報】
+タイトル: {main_article.title}
+本文: {article_content[:1500]}
+
+【抽出基準】
+この記事を理解するために、追加の背景情報や詳細な解説が必要な要素を特定してください：
+
+1. **企業名・組織名**
+   - 例: 「NVIDIA」「トヨタ自動車」「日本銀行」「FRB」
+   - 記事で言及されているが、その企業の事業内容・業績・戦略などの背景情報が不足している場合
+
+2. **専門用語・経済概念**
+   - 例: 「量的緩和」「PER」「AI半導体」「サプライチェーン」
+   - 記事で使われているが、その意味や仕組みの詳しい説明がない場合
+
+3. **経済指標・統計データ**
+   - 例: 「CPI」「GDP」「失業率」「PMI」
+   - 記事で数字が出ているが、その指標の意味や重要性の説明が不足している場合
+
+4. **政策・制度・規制**
+   - 例: 「ゼロ金利政策」「インボイス制度」「関税政策」
+   - 記事で触れられているが、その背景や影響の詳細が不明な場合
+
+5. **人物名（役職付き）**
+   - 例: 「パウエルFRB議長」「植田日銀総裁」「イーロン・マスク」
+   - 記事で名前が出ているが、その人物の経歴や立場の説明が不足している場合
+
+6. **製品・サービス・技術**
+   - 例: 「ChatGPT」「iPhone 15」「自動運転技術」
+   - 記事で言及されているが、その詳細や市場への影響が不明な場合
+
+【重要】
+- 一般的すぎる単語（「市場」「株価」「経済」「企業」「投資」など）は避ける
+- 記事で既に十分に説明されている要素は除外する
+- 具体的で検索可能なキーワードを選ぶ
+- 関連記事を検索する際に有用なキーワードを選ぶ
+- 視聴者にとって「もっと詳しく知りたい」と思える要素を優先
+
+【出力形式】
+各行に1つずつキーワードを出力してください（説明は不要）。
+重要度順に並べてください。
+
+例:
+NVIDIA
+量的緩和政策
+AI半導体市場
+パウエルFRB議長
+CPI（消費者物価指数）
+"""
+
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "あなたは金融ニュース分析の専門家です。記事から「情報を補足すべき重要キーワード」を抽出してください。"
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=200,
+                temperature=0.3,
+            )
+
+            result = response.choices[0].message.content.strip()
+            keywords = [line.strip() for line in result.split('\n') if line.strip()]
+
+            # 空行やコメントを除外
+            keywords = [kw for kw in keywords if kw and not kw.startswith('#') and not kw.startswith('//')]
+
+            logger.info(f"Extracted {len(keywords)} important keywords: {', '.join(keywords[:3])}...")
+
+            return keywords[:max_keywords]
+
+        except Exception as e:
+            logger.error(f"Error extracting important keywords: {e}")
+            # フォールバック: 簡易抽出
+            text = f"{main_article.title} {main_article.summary}"
+            keywords = self._extract_keywords(text)
+            return sorted(keywords, key=len, reverse=True)[:max_keywords]
 
     def _get_embedding(self, text: str) -> Optional[np.ndarray]:
         """
@@ -956,189 +933,6 @@ class NewsFetcher:
 
         return jaccard
 
-    def _extract_deep_dive_keywords(self, main_article: NewsArticle) -> List[str]:
-        """
-        OpenAI APIを使ってメイン記事から「深掘りすべきキーワード」を抽出
-
-        【目的】
-        メイン記事で一言しか触れられていないが、重要な用語・企業名・概念を特定し、
-        それらについて詳しく調べるための検索クエリを生成する
-
-        Args:
-            main_article: メイン記事
-
-        Returns:
-            深掘りすべきキーワードのリスト（重要度順）
-        """
-        if not self.openai_client:
-            logger.warning("OpenAI client not initialized, falling back to simple keyword extraction")
-            return list(self._extract_keywords(main_article.title))[:5]
-
-        try:
-            prompt = f"""
-以下の金融ニュース記事を分析してください。
-
-【記事情報】
-タイトル: {main_article.title}
-本文: {main_article.content[:1000] if main_article.content else main_article.summary}
-
-【タスク】
-この記事で言及されているが、詳細が不足している重要な要素を5つ抽出してください。
-台本作成時に深掘りして説明すべきキーワードです。
-
-【抽出すべき要素の例】
-- 企業名（例：「NVIDIA」「トヨタ自動車」）
-- 専門用語・概念（例：「量的緩和」「PER」「AI半導体」）
-- 経済指標（例：「CPI」「GDP」「失業率」）
-- 政策・制度（例：「ゼロ金利政策」「インボイス制度」）
-- 人物名（例：「パウエルFRB議長」「イーロン・マスク」）
-- 製品・サービス名（例：「ChatGPT」「iPhone 15」）
-
-【重要】
-- 一般的すぎる単語（「市場」「株価」「経済」）は避ける
-- 具体的で検索可能なキーワードを選ぶ
-- 記事で詳しく説明されていない要素を優先
-- 日本語で出力
-
-【出力形式】
-各行に1つずつキーワードを出力してください（説明不要）。
-重要度順に並べてください。
-
-例：
-NVIDIA
-量的緩和
-パウエルFRB議長
-AI半導体市場
-CPI（消費者物価指数）
-"""
-
-            response = self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "あなたは金融ニュース分析の専門家です。記事から深掘りすべき重要キーワードを抽出してください。"},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=200,
-                temperature=0.3,
-            )
-
-            result = response.choices[0].message.content.strip()
-            keywords = [line.strip() for line in result.split('\n') if line.strip()]
-
-            logger.info(f"Extracted {len(keywords)} deep-dive keywords: {', '.join(keywords[:3])}...")
-            return keywords
-
-        except Exception as e:
-            logger.error(f"Error extracting deep-dive keywords: {e}")
-            # フォールバック：通常のキーワード抽出
-            return list(self._extract_keywords(main_article.title))[:5]
-
-    def _search_by_specific_topic(self, topic: str, max_results: int = 3) -> List[NewsArticle]:
-        """
-        特定のトピックについてOpenAI APIで検索
-
-        Args:
-            topic: 検索するトピック（例：「NVIDIA」「量的緩和」）
-            max_results: 取得する記事の最大数
-
-        Returns:
-            検索された記事のリスト
-        """
-        if not self.openai_news_fetcher:
-            logger.debug(f"OpenAINewsFetcher not available, skipping topic search for: {topic}")
-            return []
-
-        try:
-            # OpenAI APIで関連記事を検索
-            openai_articles = self.openai_news_fetcher.search_related_articles(
-                main_article_title=f"{topic}に関するニュース",
-                main_article_summary=f"{topic}についての最新情報",
-                keywords=[topic],
-                max_articles=max_results,
-            )
-
-            # NewsArticleオブジェクトに変換
-            articles = []
-            for article_dict in openai_articles:
-                article = NewsArticle(
-                    title=article_dict["title"],
-                    summary=article_dict["summary"],
-                    url=article_dict["url"],
-                    published_at=article_dict["published_at"],
-                    source=article_dict["source"],
-                    content=article_dict["content"],
-                )
-                articles.append(article)
-
-            logger.debug(f"Found {len(articles)} articles for topic: {topic} via OpenAI")
-            return articles
-
-        except Exception as e:
-            logger.warning(f"Error searching for topic '{topic}' via OpenAI: {e}")
-            return []
-
-    def _search_related_articles_dynamic(
-        self, main_article: NewsArticle, max_results: int = 5
-    ) -> List[NewsArticle]:
-        """
-        メイン記事に関連する記事をOpenAI APIで動的に検索
-
-        Args:
-            main_article: メイン記事
-            max_results: 取得する記事の最大数
-
-        Returns:
-            検索された関連記事のリスト
-        """
-        if not self.openai_news_fetcher:
-            logger.info("OpenAINewsFetcher not available, skipping dynamic search")
-            return []
-
-        try:
-            # メイン記事からキーワードを抽出
-            main_text = f"{main_article.title} {main_article.summary}"
-            keywords = self._extract_keywords(main_text)
-
-            # キーワードを上位5つに絞る
-            sorted_keywords = sorted(keywords, key=len, reverse=True)[:5]
-
-            if not sorted_keywords:
-                logger.warning("No keywords extracted from main article")
-                return []
-
-            logger.info(f"Searching related articles with keywords: {', '.join(list(sorted_keywords)[:3])}...")
-
-            # OpenAI APIで関連記事を検索
-            openai_articles = self.openai_news_fetcher.search_related_articles(
-                main_article_title=main_article.title,
-                main_article_summary=main_article.summary,
-                keywords=list(sorted_keywords),
-                max_articles=max_results,
-            )
-
-            # NewsArticleオブジェクトに変換
-            articles = []
-            for article_dict in openai_articles:
-                # メイン記事と同じタイトルはスキップ
-                if article_dict["title"] == main_article.title:
-                    continue
-
-                article = NewsArticle(
-                    title=article_dict["title"],
-                    summary=article_dict["summary"],
-                    url=article_dict["url"],
-                    published_at=article_dict["published_at"],
-                    source=article_dict["source"],
-                    content=article_dict["content"],
-                )
-                articles.append(article)
-
-            logger.info(f"Found {len(articles)} related articles via OpenAI")
-            return articles[:max_results]
-
-        except Exception as e:
-            logger.error(f"Error in dynamic article search via OpenAI: {e}")
-            return []
 
     def calculate_trending_score(self, article: NewsArticle) -> float:
         """

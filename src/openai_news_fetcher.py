@@ -97,6 +97,15 @@ Reuters Markets (https://www.reuters.com/markets/) のような高品質な金�
 5. 投資家向けに実用的で価値のある情報を提供
 6. 人物を言及する場合は、知識カットオフ時点で正確な情報のみを使用
 
+【URLの生成方法 - 超重要】
+記事のURLは以下の形式で**実際に存在する**URLを生成してください：
+
+Reuters Markets形式:
+https://www.reuters.com/[カテゴリー]/[記事titie]-[日付]/
+
+例:
+- https://www.reuters.com/sustainability/sustainable-finance-reporting/michael-burry-big-short-fame-deregisters-scion-asset-management-2025-11-13/
+
 【JSON形式で出力】
 {{
   "articles": [
@@ -108,8 +117,8 @@ Reuters Markets (https://www.reuters.com/markets/) のような高品質な金�
         2. 具体的なデータ・数字・事実（400-500文字）
         3. 専門家の分析・市場の反応（300-400文字）
         4. 投資家への影響・今後の見通し（300-400文字）",
-      "source": "Bloomberg",
-      "url": "https://www.bloomberg.com/news/articles/example",
+      "source": "Reuters",
+      "url": https://www.reuters.com/[カテゴリー]/[記事titie]-[日付]/
       "published_at": "{date}T10:00:00Z"
     }}
   ]
@@ -117,6 +126,7 @@ Reuters Markets (https://www.reuters.com/markets/) のような高品質な金�
 
 【重要】必ず{max_articles}件の記事を生成してください。
 【必須】各記事のcontentは必ず1200文字以上にしてください。1000文字未満は不可です。
+【必須】URLは上記の形式で実在するものを生成すること。
 """
 
         try:
@@ -282,6 +292,15 @@ Reuters Markets (https://www.reuters.com/markets/) のような高品質な金�
 6. 人物を言及する場合は、現在の正しい役職を使用する
 7. 全トークンを使って、徹底的に深掘りした記事を作成する
 
+【URLの生成方法 - 超重要】
+記事のURLは以下の形式で**実際に存在する**URLを生成してください：
+
+Reuters Markets形式:
+https://www.reuters.com/[カテゴリー]/[記事titie]-[日付]/
+
+例:
+- https://www.reuters.com/sustainability/sustainable-finance-reporting/michael-burry-big-short-fame-deregisters-scion-asset-management-2025-11-13/
+
 【JSON形式で出力】
 {{
   "articles": [
@@ -293,14 +312,17 @@ Reuters Markets (https://www.reuters.com/markets/) のような高品質な金�
         2. 具体的なデータ・数字・事実（400-500文字）- 詳細な統計や事例
         3. 専門家の分析・市場の反応（250-350文字）- 深い洞察
         4. 投資家への影響・今後の見通し（200-300文字）- 実践的なアドバイス",
-      "source": "Bloomberg",
-      "url": "https://www.bloomberg.com/news/articles/example",
-      "published_at": "2025-11-11T10:00:00Z"
+      "source": "Reuters",
+      "url": "https://www.reuters.com/[カテゴリー]/[記事titie]-[日付]/",
+      "published_at": "2025-11-13T10:00:00Z"
     }}
   ]
 }}
 
-【最重要】この1件の記事に全力を注いでください。contentは1000文字以上必須です。
+【最重要】
+- contentは1000文字以上必須
+- URLは上記の形式で実在するもの生成すること
+- sourceは"Reuters"または"Bloomberg"を使用
 """
 
             try:

@@ -9,6 +9,8 @@ from typing import List, Dict, Optional
 from datetime import datetime
 import pytz
 from openai import OpenAI
+import requests
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +70,10 @@ class OpenAINewsFetcher:
         # 注: GPT-4o-miniの知識カットオフは2024年10月
         # 最新の人事・役職情報は反映されない可能性があるため注意
         query = f"""
-以下のトピックについて、金融・経済ニュース記事を{max_articles}件作成してください。
+以下のトピックについて、**{date}（本日）から過去24時間以内**にリリースされた金融・経済ニュース記事を{max_articles}件作成してください。
+
+【対象日付】
+{date}（本日の日付） - 過去24時間以内の最新ニュース
 
 【対象トピック】
 {topics_str}
@@ -83,11 +88,14 @@ Reuters Markets (https://www.reuters.com/markets/) のような高品質な金�
 
 【重要な注意事項】
 - あなたの知識カットオフは2024年10月です
-- 2024年10月以降の情報については推測しないでください
+- **本日は{date}です** - この日付から過去24時間以内の最新情報を基に記事を作成してください
+- {date}以前の最新情報を使用してください（それ以降の情報は推測しない）
+- 記事は「速報性」を重視し、直近24時間以内の出来事として作成してください
 - 人事・役職については知識カットオフ時点の最新情報を使用してください
 - 例: 日本銀行総裁は植田和男氏（2023年4月就任）
 - 架空の人物名や役職を作成しないでください
 - 不確実な情報は含めないでください
+- **記事の日付（published_at）は必ず{date}またはその前日にしてください**
 
 【記事作成の指示】
 1. Reuters Marketsのような具体的で詳細な記事を作成
@@ -182,7 +190,10 @@ https://www.reuters.com/[カテゴリー]/[記事titie]-[日付]/
                     }
                 )
 
-            return news_articles
+            # URLが有効な記事のみをフィルタリング
+            valid_articles = self._filter_valid_articles(news_articles)
+
+            return valid_articles
 
         except Exception as e:
             logger.error(f"Error fetching news via OpenAI Web Search: {e}")
@@ -202,6 +213,86 @@ https://www.reuters.com/[カテゴリー]/[記事titie]-[日付]/
             logger.debug(f"Failed to parse datetime: {datetime_str}, error: {e}")
 
         return None
+
+    def _validate_url(self, url: str, timeout: int = 5) -> bool:
+        """
+        URLが有効かどうかを検証
+
+        Args:
+            url: 検証するURL
+            timeout: タイムアウト時間（秒）
+
+        Returns:
+            URLが有効な場合True、無効な場合False
+        """
+        if not url or not url.startswith("http"):
+            logger.debug(f"Invalid URL format: {url}")
+            return False
+
+        try:
+            # URLの形式を検証
+            parsed = urlparse(url)
+            if not all([parsed.scheme, parsed.netloc]):
+                logger.debug(f"URL parsing failed: {url}")
+                return False
+
+            # HEAD リクエストでURLの存在を確認
+            response = requests.head(
+                url,
+                timeout=timeout,
+                allow_redirects=True,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+            )
+
+            # ステータスコードが200-399の範囲なら有効
+            is_valid = 200 <= response.status_code < 400
+
+            if not is_valid:
+                logger.debug(f"URL returned status {response.status_code}: {url}")
+
+            return is_valid
+
+        except requests.exceptions.Timeout:
+            logger.debug(f"URL validation timeout: {url}")
+            return False
+        except requests.exceptions.RequestException as e:
+            logger.debug(f"URL validation failed for {url}: {e}")
+            return False
+        except Exception as e:
+            logger.debug(f"Unexpected error validating URL {url}: {e}")
+            return False
+
+    def _filter_valid_articles(self, articles: List[Dict]) -> List[Dict]:
+        """
+        URLが有効な記事のみをフィルタリング
+
+        Args:
+            articles: 記事のリスト
+
+        Returns:
+            有効なURLを持つ記事のリスト
+        """
+        valid_articles = []
+
+        logger.info(f"Validating URLs for {len(articles)} articles...")
+
+        for i, article in enumerate(articles, 1):
+            url = article.get("url", "")
+            title = article.get("title", "No title")[:50]
+
+            logger.info(f"  [{i}/{len(articles)}] Validating: {title}...")
+
+            if self._validate_url(url):
+                logger.info(f"    ✓ Valid URL: {url}")
+                valid_articles.append(article)
+            else:
+                logger.warning(f"    ✗ Invalid URL (excluded): {url}")
+
+        logger.info(f"URL validation complete: {len(valid_articles)}/{len(articles)} articles have valid URLs")
+
+        return valid_articles
 
     def search_related_articles(
         self,
@@ -278,6 +369,10 @@ Reuters Markets (https://www.reuters.com/markets/) のような高品質な金�
 
 【重要な注意事項】
 - あなたの知識カットオフは2024年10月です
+- 知識カットオフ以前の情報（2024年10月まで）を使用してください
+- 記事の日付（published_at）は、メイン記事の関連情報として適切な時期を選んでください
+  - 背景・歴史的文脈の記事なら過去の日付でも可
+  - 最新の市場動向なら最近の日付
 - 人事・役職については知識カットオフ時点の最新情報を使用してください
 - 例: 日本銀行総裁は植田和男氏（2023年4月就任）、黒田東彦氏は2023年4月に退任
 - 架空の人物名や古い役職情報を使用しないでください
@@ -372,7 +467,11 @@ https://www.reuters.com/[カテゴリー]/[記事titie]-[日付]/
                 continue
 
         logger.info(f"Total {len(all_articles)} related articles fetched via OpenAI")
-        return all_articles[:max_articles]
+
+        # URLが有効な記事のみをフィルタリング
+        valid_articles = self._filter_valid_articles(all_articles)
+
+        return valid_articles[:max_articles]
 
 
 def main():

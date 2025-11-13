@@ -8,6 +8,8 @@ import logging
 from typing import Dict, List
 from openai import OpenAI
 from datetime import datetime
+import requests
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -297,12 +299,46 @@ URL: {news_article.get('url', '')}
 
         return prompt
 
+    def _validate_url(self, url: str, timeout: int = 5) -> bool:
+        """
+        URLが有効かどうかを検証
+
+        Args:
+            url: 検証するURL
+            timeout: タイムアウト時間（秒）
+
+        Returns:
+            URLが有効な場合True、無効な場合False
+        """
+        if not url or not url.startswith("http"):
+            return False
+
+        try:
+            parsed = urlparse(url)
+            if not all([parsed.scheme, parsed.netloc]):
+                return False
+
+            response = requests.head(
+                url,
+                timeout=timeout,
+                allow_redirects=True,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                }
+            )
+
+            return 200 <= response.status_code < 400
+
+        except Exception:
+            return False
+
     def _fix_reference_urls(self, description: str, news_article: Dict = None, related_articles: List[Dict] = None) -> str:
         """
         説明文内の参考記事セクションのURLを実際のURLで置き換え
 
         OpenAI APIがプレースホルダーURLを生成してしまう問題を修正するため、
         参考記事セクションを完全に再構築する
+        さらに、無効なURLを持つ記事は除外する
 
         Args:
             description: 元の説明文
@@ -334,18 +370,39 @@ URL: {news_article.get('url', '')}
         # 参考記事セクションを再構築
         ref_section = "\n\n📰 参考記事\n\n"
 
+        # メイン記事のURL検証
         if news_article:
-            ref_section += "【メイン記事】\n"
-            ref_section += f"{news_article.get('title', '')}\n"
-            ref_section += f"出典: {news_article.get('source', '')}\n"
-            ref_section += f"{news_article.get('url', '')}\n"
+            main_url = news_article.get('url', '')
+            if main_url and self._validate_url(main_url):
+                ref_section += "【メイン記事】\n"
+                ref_section += f"{news_article.get('title', '')}\n"
+                ref_section += f"出典: {news_article.get('source', '')}\n"
+                ref_section += f"{main_url}\n"
+                logger.info(f"Main article URL is valid: {main_url}")
+            else:
+                logger.warning(f"Main article URL is invalid, excluding from metadata: {main_url}")
 
+        # 関連記事のURL検証とフィルタリング
         if related_articles and len(related_articles) > 0:
-            ref_section += "\n【関連記事】\n"
-            for i, article in enumerate(related_articles, 1):
-                ref_section += f"{i}. {article.get('title', '')}\n"
-                ref_section += f"   出典: {article.get('source', '')}\n"
-                ref_section += f"   {article.get('url', '')}\n\n"
+            valid_related = []
+            for article in related_articles:
+                url = article.get('url', '')
+                if url and self._validate_url(url):
+                    valid_related.append(article)
+                    logger.info(f"Related article URL is valid: {url}")
+                else:
+                    logger.warning(f"Related article URL is invalid, excluding: {url}")
+
+            if valid_related:
+                ref_section += "\n【関連記事】\n"
+                for i, article in enumerate(valid_related, 1):
+                    ref_section += f"{i}. {article.get('title', '')}\n"
+                    ref_section += f"   出典: {article.get('source', '')}\n"
+                    ref_section += f"   {article.get('url', '')}\n\n"
+
+                logger.info(f"Included {len(valid_related)}/{len(related_articles)} related articles with valid URLs")
+            else:
+                logger.warning("No related articles with valid URLs")
 
         # 説明文と参考記事を結合
         return base_description + ref_section

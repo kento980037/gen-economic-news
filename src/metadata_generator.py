@@ -76,8 +76,8 @@ class MetadataGenerator:
             # レスポンスからテキストを抽出
             response_text = response.choices[0].message.content
 
-            # メタデータを解析
-            metadata = self._parse_metadata_response(response_text)
+            # メタデータを解析（記事データを渡してURL修正を行う）
+            metadata = self._parse_metadata_response(response_text, news_article, related_articles)
 
             # デフォルトタグを追加
             default_tags = self.tags_config.get("default_tags", [])
@@ -297,12 +297,67 @@ URL: {news_article.get('url', '')}
 
         return prompt
 
-    def _parse_metadata_response(self, response_text: str) -> Dict:
+    def _fix_reference_urls(self, description: str, news_article: Dict = None, related_articles: List[Dict] = None) -> str:
+        """
+        説明文内の参考記事セクションのURLを実際のURLで置き換え
+
+        OpenAI APIがプレースホルダーURLを生成してしまう問題を修正するため、
+        参考記事セクションを完全に再構築する
+
+        Args:
+            description: 元の説明文
+            news_article: メイン記事データ
+            related_articles: 関連記事データのリスト
+
+        Returns:
+            修正された説明文
+        """
+        # 参考記事セクションを探す
+        ref_section_markers = ["📰 参考記事", "参考記事", "## 参考記事"]
+        ref_start_idx = -1
+
+        for marker in ref_section_markers:
+            idx = description.find(marker)
+            if idx != -1:
+                ref_start_idx = idx
+                break
+
+        # 参考記事セクションが見つからない場合は、説明文の末尾に追加
+        if ref_start_idx == -1:
+            logger.warning("Reference section not found in description, appending it")
+            # 説明文の本文部分を保持
+            base_description = description.strip()
+        else:
+            # 参考記事セクションより前の部分を保持
+            base_description = description[:ref_start_idx].strip()
+
+        # 参考記事セクションを再構築
+        ref_section = "\n\n📰 参考記事\n\n"
+
+        if news_article:
+            ref_section += "【メイン記事】\n"
+            ref_section += f"{news_article.get('title', '')}\n"
+            ref_section += f"出典: {news_article.get('source', '')}\n"
+            ref_section += f"{news_article.get('url', '')}\n"
+
+        if related_articles and len(related_articles) > 0:
+            ref_section += "\n【関連記事】\n"
+            for i, article in enumerate(related_articles, 1):
+                ref_section += f"{i}. {article.get('title', '')}\n"
+                ref_section += f"   出典: {article.get('source', '')}\n"
+                ref_section += f"   {article.get('url', '')}\n\n"
+
+        # 説明文と参考記事を結合
+        return base_description + ref_section
+
+    def _parse_metadata_response(self, response_text: str, news_article: Dict = None, related_articles: List[Dict] = None) -> Dict:
         """
         Claude APIのレスポンスを解析
 
         Args:
             response_text: Claude APIからの生成テキスト
+            news_article: メイン記事データ（URL修正用）
+            related_articles: 関連記事データ（URL修正用）
 
         Returns:
             メタデータ辞書
@@ -371,6 +426,10 @@ URL: {news_article.get('url', '')}
             # 簡易的に8文字目以降を抽出
             thumbnail_sub = title[8:20]
             logger.warning(f"Thumbnail sub text not found, using truncated title: {thumbnail_sub}")
+
+        # 説明文の参考記事セクションを実際のURLで置き換え
+        if news_article or related_articles:
+            description = self._fix_reference_urls(description, news_article, related_articles)
 
         return {
             "title": title.strip(),

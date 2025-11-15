@@ -14,6 +14,7 @@ import pytz
 import numpy as np
 from openai import OpenAI
 from openai_news_fetcher import OpenAINewsFetcher
+from news_scraper import NewsScraper
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,14 @@ class NewsFetcher:
             self.openai_client = None
             logger.warning("OPENAI_API_KEY not set, embedding-based similarity disabled")
 
-        # OpenAI Web Search用のフェッチャー
+        # News Scraper（Yahoo! Finance / CNBC から直接取得）- 最優先
+        try:
+            self.news_scraper = NewsScraper(api_key=self.openai_api_key, use_openai_enhancement=True)
+        except Exception as e:
+            logger.warning(f"NewsScraper initialization failed: {e}")
+            self.news_scraper = None
+
+        # OpenAI Web Search用のフェッチャー（フォールバック）
         try:
             self.openai_news_fetcher = OpenAINewsFetcher(api_key=self.openai_api_key)
         except Exception as e:
@@ -108,15 +116,23 @@ class NewsFetcher:
         articles = []
         sources = self.config.get("sources", ["rss"])
 
-        if "openai" in sources and self.openai_news_fetcher:
-            logger.info("Fetching news from OpenAI Web Search...")
-            openai_articles = self._fetch_from_openai()
-            articles.extend(openai_articles)
+        # 優先順位1: News Scraper（Yahoo! Finance / CNBC から直接取得）
+        if self.news_scraper and len(articles) < self.max_articles:
+            logger.info("Fetching news from News Scraper (Yahoo Finance / CNBC)...")
+            scraped_articles = self._fetch_from_news_scraper()
+            articles.extend(scraped_articles)
 
-        if "rss" in sources:
+        # 優先順位2: 従来のRSSフィード（フォールバック）
+        if "rss" in sources and len(articles) < self.max_articles:
             logger.info("Fetching news from RSS feeds...")
             rss_articles = self._fetch_from_rss()
             articles.extend(rss_articles)
+
+        # 優先順位3: OpenAI Web Search（最後のフォールバック）
+        if "openai" in sources and self.openai_news_fetcher and len(articles) < self.max_articles:
+            logger.info("Fetching news from OpenAI Web Search (fallback)...")
+            openai_articles = self._fetch_from_openai()
+            articles.extend(openai_articles)
 
         if "newsapi" in sources and self.news_api_key:
             logger.info("Fetching news from NewsAPI...")
@@ -250,6 +266,40 @@ class NewsFetcher:
 
         except Exception as e:
             logger.error(f"Error fetching from NewsAPI: {e}")
+
+        return articles
+
+    def _fetch_from_news_scraper(self) -> List[NewsArticle]:
+        """NewsScraperから日本のニュースサイトを取得"""
+        articles = []
+
+        if not self.news_scraper:
+            logger.warning("NewsScraper not initialized, skipping scraper source")
+            return articles
+
+        try:
+            # 日本と海外のニュースサイトからスクレイピング
+            scraped_news = self.news_scraper.fetch_articles(
+                max_articles=self.max_articles,
+                include_international=True  # 海外ニュースサイトも含める
+            )
+
+            # NewsArticleオブジェクトに変換
+            for news in scraped_news:
+                article = NewsArticle(
+                    title=news["title"],
+                    summary=news["summary"],
+                    url=news["url"],
+                    published_at=news["published_at"],
+                    source=news["source"],
+                    content=news["content"],
+                )
+                articles.append(article)
+
+            logger.info(f"Fetched {len(articles)} articles from News Scraper")
+
+        except Exception as e:
+            logger.error(f"Error fetching from News Scraper: {e}")
 
         return articles
 

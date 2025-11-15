@@ -370,39 +370,22 @@ URL: {news_article.get('url', '')}
         # 参考記事セクションを再構築
         ref_section = "\n\n📰 参考記事\n\n"
 
-        # メイン記事のURL検証
+        # メイン記事の情報を追加
         if news_article:
-            main_url = news_article.get('url', '')
-            if main_url and self._validate_url(main_url):
-                ref_section += "【メイン記事】\n"
-                ref_section += f"{news_article.get('title', '')}\n"
-                ref_section += f"出典: {news_article.get('source', '')}\n"
-                ref_section += f"{main_url}\n"
-                logger.info(f"Main article URL is valid: {main_url}")
-            else:
-                logger.warning(f"Main article URL is invalid, excluding from metadata: {main_url}")
+            ref_section += "【メイン記事】\n"
+            ref_section += f"{news_article.get('title', '')}\n"
+            ref_section += f"出典: {news_article.get('source', '')}\n"
+            ref_section += f"{news_article.get('url', '')}\n"
 
-        # 関連記事のURL検証とフィルタリング
+        # 関連記事の情報を追加
         if related_articles and len(related_articles) > 0:
-            valid_related = []
-            for article in related_articles:
-                url = article.get('url', '')
-                if url and self._validate_url(url):
-                    valid_related.append(article)
-                    logger.info(f"Related article URL is valid: {url}")
-                else:
-                    logger.warning(f"Related article URL is invalid, excluding: {url}")
+            ref_section += "\n【関連記事】\n"
+            for i, article in enumerate(related_articles, 1):
+                ref_section += f"{i}. {article.get('title', '')}\n"
+                ref_section += f"   出典: {article.get('source', '')}\n"
+                ref_section += f"   {article.get('url', '')}\n\n"
 
-            if valid_related:
-                ref_section += "\n【関連記事】\n"
-                for i, article in enumerate(valid_related, 1):
-                    ref_section += f"{i}. {article.get('title', '')}\n"
-                    ref_section += f"   出典: {article.get('source', '')}\n"
-                    ref_section += f"   {article.get('url', '')}\n\n"
-
-                logger.info(f"Included {len(valid_related)}/{len(related_articles)} related articles with valid URLs")
-            else:
-                logger.warning("No related articles with valid URLs")
+            logger.info(f"Included {len(related_articles)} related articles in metadata")
 
         # 説明文と参考記事を結合
         return base_description + ref_section

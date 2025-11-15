@@ -189,7 +189,7 @@ class VideoGenerationPipeline:
 
     def _generate_script(self, news_article):
         """台本を生成（関連記事を取得してコンテキストを充実）"""
-        target_duration = self.config.get("app", {}).get("target_duration", 180)
+        target_duration = self.config.get("app", {}).get("target_duration", 540)
 
         # 関連記事を取得（最大10本：情報の厚みを作る）
         logger.info("Fetching related articles for context...")

@@ -37,7 +37,7 @@ class ScriptGenerator:
     def generate_script(
         self,
         news_article: Dict,
-        target_duration: int = 180,
+        target_duration: int = 540,
         additional_context: Optional[str] = None,
     ) -> Dict:
         """
@@ -107,14 +107,14 @@ class ScriptGenerator:
             raise
 
     def generate_script_from_multiple_articles(
-        self, news_articles: List[Dict], target_duration: int = 300
+        self, news_articles: List[Dict], target_duration: int = 540
     ) -> Dict:
         """
         複数のニュース記事から1つの台本を生成（まとめニュース形式）
 
         Args:
             news_articles: ニュース記事の辞書リスト
-            target_duration: 目標動画時間（秒）デフォルト300秒=5分
+            target_duration: 目標動画時間（秒）デフォルト540秒=9分
 
         Returns:
             生成された台本の辞書

@@ -431,7 +431,12 @@ URL: {url}
 
     def search_cnbc_articles(self, query: str, max_articles: int = 10) -> List[Dict]:
         """
-        CNBCの検索機能を使って記事を取得
+        CNBCの検索API（Queryly）を使って記事を取得
+
+        注意: このAPIはCNBCのWebサイトで使用されている公開APIです。
+        - APIキーは公開情報（Webサイトに埋め込まれている）
+        - いつでも変更・廃止される可能性があります
+        - 過度なリクエストは避けてください
 
         Args:
             query: 検索クエリ（キーワード）
@@ -441,44 +446,66 @@ URL: {url}
             記事情報のリスト
         """
         articles = []
-        search_url = f"https://www.cnbc.com/search/?query={query}&qsearchterm={query}"
 
-        logger.info(f"Searching CNBC for '{query}' (max {max_articles} articles)...")
+        logger.info(f"Searching CNBC via Queryly API for '{query}' (max {max_articles} articles)...")
 
         try:
-            response = self.session.get(search_url, timeout=15)
+            # Queryly API を使用（CNBCのWebサイトで使用されている公開API）
+            api_url = "https://api.queryly.com/cnbc/json.aspx"
+            params = {
+                "queryly_key": "31a35d40a9a64ab3",  # CNBCの公開APIキー（Webサイトから取得）
+                "query": query,
+                "endindex": min(max_articles * 2, 40),  # 上限設定（過度なリクエスト防止）
+                "batchsize": min(max_articles * 2, 40),
+                "showfaceted": "false"
+            }
+
+            # レート制限を考慮して少し待機
+            time.sleep(random.uniform(0.5, 1.0))
+
+            response = self.session.get(api_url, params=params, timeout=15)
             response.raise_for_status()
 
-            soup = BeautifulSoup(response.content, "html.parser")
+            data = response.json()
 
-            # 検索結果から記事リンクを探す
-            article_links = soup.find_all("a", href=True)
+            if 'results' not in data:
+                logger.warning(f"No results in API response for query: {query}")
+                return articles
 
-            base_url = "https://www.cnbc.com"
+            results = data['results']
+            logger.info(f"  API returned {len(results)} results")
 
-            for link in article_links:
+            # 各結果から記事情報を抽出
+            for result in results:
                 if len(articles) >= max_articles:
                     break
 
-                href = link.get("href", "")
+                url = result.get('url', '')
+                title = result.get('cn:title', '') or result.get('title', '')
+                summary = result.get('description', '') or result.get('summary', '')
 
-                # 記事URLのパターン
-                if href.startswith(base_url) and "/2025/" in href:
-                    full_url = href
+                # 2025年の記事のみ
+                if '/2025/' not in url:
+                    continue
 
-                    # 重複チェック
-                    if any(a["url"] == full_url for a in articles):
-                        continue
+                # 重複チェック
+                if any(a["url"] == url for a in articles):
+                    continue
 
-                    # 記事ページから正確なタイトルと要約を取得
-                    article = self._fetch_cnbc_article_lightweight(full_url)
-                    if article:
-                        articles.append(article)
-                        logger.info(f"    ✓ Found: {article['title'][:50]}...")
-                        time.sleep(random.uniform(1.0, 2.0))  # レート制限対策
+                # 軽量版として要約をそのまま使用（詳細取得はしない）
+                if title and summary and len(summary) > 50:
+                    articles.append({
+                        "title": title,
+                        "summary": summary[:500],
+                        "content": summary,  # 軽量版では要約をcontentとして使用
+                        "source": "CNBC",
+                        "url": url,
+                        "published_at": datetime.now(pytz.UTC),
+                    })
+                    logger.info(f"    ✓ Found: {title[:50]}...")
 
         except Exception as e:
-            logger.error(f"Error searching CNBC for '{query}': {e}")
+            logger.error(f"Error searching CNBC via Queryly API for '{query}': {e}")
 
         logger.info(f"Found {len(articles)} articles from CNBC search")
         return articles

@@ -667,7 +667,7 @@ class NewsFetcher:
 
     def get_related_articles(self, main_article: NewsArticle, max_related: int = 10) -> List[NewsArticle]:
         """
-        メイン記事に関連する記事を取得（CNBC検索で実際の記事をスクレイピング）
+        メイン記事に関連する記事を取得（Queryly API検索で実際の記事を取得）
 
         Args:
             main_article: メイン記事
@@ -692,14 +692,14 @@ class NewsFetcher:
 
             logger.info(f"Searching CNBC with keywords: {', '.join(keywords)}...")
 
-            # キーワードを使ってCNBCを検索（実際の記事をスクレイピング）
+            # キーワードを使ってCNBC Queryly APIで検索
             all_related_articles = []
 
             for keyword in keywords:
                 if len(all_related_articles) >= max_related:
                     break
 
-                # CNBC検索で記事を取得
+                # CNBC Queryly APIで記事を検索
                 search_results = self.news_scraper.search_cnbc_articles(
                     query=keyword,
                     max_articles=max_related // len(keywords) + 2  # キーワードごとに数記事

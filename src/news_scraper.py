@@ -429,6 +429,60 @@ URL: {url}
             logger.error(f"Error enhancing content with OpenAI: {e}")
             return content
 
+    def search_cnbc_articles(self, query: str, max_articles: int = 10) -> List[Dict]:
+        """
+        CNBCの検索機能を使って記事を取得
+
+        Args:
+            query: 検索クエリ（キーワード）
+            max_articles: 取得する最大記事数
+
+        Returns:
+            記事情報のリスト
+        """
+        articles = []
+        search_url = f"https://www.cnbc.com/search/?query={query}&qsearchterm={query}"
+
+        logger.info(f"Searching CNBC for '{query}' (max {max_articles} articles)...")
+
+        try:
+            response = self.session.get(search_url, timeout=15)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, "html.parser")
+
+            # 検索結果から記事リンクを探す
+            article_links = soup.find_all("a", href=True)
+
+            base_url = "https://www.cnbc.com"
+
+            for link in article_links:
+                if len(articles) >= max_articles:
+                    break
+
+                href = link.get("href", "")
+
+                # 記事URLのパターン
+                if href.startswith(base_url) and "/2025/" in href:
+                    full_url = href
+
+                    # 重複チェック
+                    if any(a["url"] == full_url for a in articles):
+                        continue
+
+                    # 記事ページから正確なタイトルと要約を取得
+                    article = self._fetch_cnbc_article_lightweight(full_url)
+                    if article:
+                        articles.append(article)
+                        logger.info(f"    ✓ Found: {article['title'][:50]}...")
+                        time.sleep(random.uniform(1.0, 2.0))  # レート制限対策
+
+        except Exception as e:
+            logger.error(f"Error searching CNBC for '{query}': {e}")
+
+        logger.info(f"Found {len(articles)} articles from CNBC search")
+        return articles
+
     def fetch_articles(self, max_articles: int = 20, include_international: bool = True) -> List[Dict]:
         """
         複数のニュースサイトから記事を取得

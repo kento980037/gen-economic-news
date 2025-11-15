@@ -667,7 +667,7 @@ class NewsFetcher:
 
     def get_related_articles(self, main_article: NewsArticle, max_related: int = 10) -> List[NewsArticle]:
         """
-        メイン記事に関連する記事を取得（OpenAI生成、実際のURLを使用）
+        メイン記事に関連する記事を取得（CNBC検索で実際の記事をスクレイピング）
 
         Args:
             main_article: メイン記事
@@ -678,59 +678,64 @@ class NewsFetcher:
         """
         logger.info(f"Finding {max_related} related articles for: {main_article.title[:50]}...")
 
-        if not self.openai_news_fetcher:
-            logger.warning("OpenAINewsFetcher not available, returning empty list")
+        if not self.news_scraper:
+            logger.warning("NewsScraper not available, returning empty list")
             return []
 
         try:
             # OpenAI APIを使って重要キーワードを抽出
-            keywords = self._extract_important_keywords(main_article, max_keywords=5)
+            keywords = self._extract_important_keywords(main_article, max_keywords=3)
 
             if not keywords:
                 logger.warning("No keywords extracted from main article")
                 return []
 
-            logger.info(f"Searching with keywords: {', '.join(keywords[:3])}...")
+            logger.info(f"Searching CNBC with keywords: {', '.join(keywords)}...")
 
-            # OpenAI APIで関連記事を検索（実際のURLを含むプロンプト使用）
-            openai_articles = self.openai_news_fetcher.search_related_articles(
-                main_article_title=main_article.title,
-                main_article_summary=main_article.summary,
-                keywords=keywords,
-                max_articles=max_related,
-            )
+            # キーワードを使ってCNBCを検索（実際の記事をスクレイピング）
+            all_related_articles = []
 
-            # NewsArticleオブジェクトに変換
-            articles = []
-            for article_dict in openai_articles:
-                # メイン記事と同じタイトルはスキップ
-                if article_dict["title"] == main_article.title:
-                    continue
+            for keyword in keywords:
+                if len(all_related_articles) >= max_related:
+                    break
 
-                # 本文が短すぎる記事を除外（200文字未満）
-                content_length = len(article_dict.get("content", ""))
-                if content_length < 200:
-                    logger.debug(f"Skipping article with insufficient content ({content_length} chars): {article_dict['title'][:50]}...")
-                    continue
-
-                article = NewsArticle(
-                    title=article_dict["title"],
-                    summary=article_dict["summary"],
-                    url=article_dict["url"],
-                    published_at=article_dict["published_at"],
-                    source=article_dict["source"],
-                    content=article_dict["content"],
+                # CNBC検索で記事を取得
+                search_results = self.news_scraper.search_cnbc_articles(
+                    query=keyword,
+                    max_articles=max_related // len(keywords) + 2  # キーワードごとに数記事
                 )
-                articles.append(article)
+
+                # NewsArticleオブジェクトに変換
+                for article_dict in search_results:
+                    if len(all_related_articles) >= max_related:
+                        break
+
+                    # メイン記事と同じタイトルはスキップ
+                    if article_dict["title"] == main_article.title:
+                        continue
+
+                    # 既に追加済みの記事はスキップ
+                    if any(a.url == article_dict["url"] for a in all_related_articles):
+                        continue
+
+                    article = NewsArticle(
+                        title=article_dict["title"],
+                        summary=article_dict["summary"],
+                        url=article_dict["url"],
+                        published_at=article_dict["published_at"],
+                        source=article_dict["source"],
+                        content=article_dict["content"],
+                    )
+                    all_related_articles.append(article)
 
             # 上位max_related件のみ返す
-            articles = articles[:max_related]
+            all_related_articles = all_related_articles[:max_related]
 
-            logger.info(f"Found {len(articles)} related articles:")
-            for article in articles:
+            logger.info(f"Found {len(all_related_articles)} related articles:")
+            for article in all_related_articles:
                 logger.info(f"  - {article.source}: {article.title[:60]}...")
 
-            return articles
+            return all_related_articles
 
         except Exception as e:
             logger.error(f"Error searching related articles: {e}")

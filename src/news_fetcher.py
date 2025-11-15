@@ -303,6 +303,47 @@ class NewsFetcher:
 
         return articles
 
+    def enrich_article_with_full_content(self, article: NewsArticle) -> NewsArticle:
+        """
+        選択された記事の詳細（全文 + OpenAI拡充）を取得
+
+        Args:
+            article: 軽量版の記事（URLとタイトルのみ）
+
+        Returns:
+            詳細情報を追加した記事
+        """
+        if not self.news_scraper:
+            logger.warning("NewsScraper not available, returning article as-is")
+            return article
+
+        # 既にcontentがある場合はスキップ
+        if article.content and len(article.content) > 300:
+            logger.info("Article already has full content, skipping enrichment")
+            return article
+
+        try:
+            logger.info(f"Fetching full article content for: {article.title[:50]}...")
+
+            # 全文を取得（OpenAI拡充含む）
+            full_article_dict = self.news_scraper.fetch_full_article(
+                url=article.url,
+                source=article.source
+            )
+
+            if full_article_dict:
+                # 既存の記事情報を更新
+                article.summary = full_article_dict["summary"]
+                article.content = full_article_dict["content"]
+                logger.info(f"  ✓ Article enriched with full content ({len(article.content)} chars)")
+            else:
+                logger.warning(f"  Failed to fetch full article from {article.url}")
+
+        except Exception as e:
+            logger.error(f"Error enriching article: {e}")
+
+        return article
+
     def _fetch_from_openai(self) -> List[NewsArticle]:
         """OpenAI Web Searchからニュースを取得"""
         articles = []

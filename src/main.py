@@ -164,7 +164,7 @@ class VideoGenerationPipeline:
 
     def _fetch_news(self):
         """ニュースを取得（話題性スコアベース）"""
-        # 全記事を一度だけ取得
+        # 全記事を一度だけ取得（軽量版：URLとタイトルのみ）
         all_articles = self.news_fetcher.fetch_news()
 
         if not all_articles:
@@ -177,6 +177,10 @@ class VideoGenerationPipeline:
         if not main_article:
             logger.warning("Trending score selection failed, falling back to latest article")
             main_article = all_articles[0]
+
+        # 選択された記事の詳細を取得（全文スクレイピング + OpenAI拡充）
+        logger.info("Fetching full content for selected article...")
+        main_article = self.news_fetcher.enrich_article_with_full_content(main_article)
 
         # 取得した記事リストをキャッシュ（追加の関連記事検索で再利用）
         self.news_fetcher._cached_articles = all_articles

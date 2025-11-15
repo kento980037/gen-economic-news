@@ -48,19 +48,19 @@ class NewsScraper:
 
     def scrape_cnbc(self, max_articles: int = 10) -> List[Dict]:
         """
-        CNBCから記事をスクレイピング
+        CNBCから記事をスクレイピング（軽量版：URLとタイトルのみ）
 
         Args:
             max_articles: 取得する最大記事数
 
         Returns:
-            記事情報のリスト
+            記事情報のリスト（url, title, summary, source, published_at）
         """
         articles = []
         base_url = "https://www.cnbc.com"
         url = base_url + "/world/"
 
-        logger.info(f"Scraping CNBC for {max_articles} articles...")
+        logger.info(f"Scraping CNBC for {max_articles} articles (lightweight)...")
 
         try:
             logger.info(f"  Scraping: {url}")
@@ -87,19 +87,44 @@ class NewsScraper:
                     if any(a["url"] == full_url for a in articles):
                         continue
 
-                    # 記事詳細を取得
-                    article = self._fetch_cnbc_article(full_url)
-                    if article:
-                        articles.append(article)
-                        logger.info(f"    ✓ Added: {article['title'][:50]}...")
+                    # タイトルを取得（リンクテキストから）
+                    title = link.get_text(strip=True)
 
-                    time.sleep(random.uniform(1.0, 2.0))  # レート制限対策（1-2秒のランダム待機）
+                    if title and len(title) > 10:
+                        articles.append({
+                            "title": title,
+                            "summary": "",  # 軽量版では空
+                            "content": "",  # 軽量版では空
+                            "source": "CNBC",
+                            "url": full_url,
+                            "published_at": datetime.now(pytz.UTC),
+                        })
+                        logger.info(f"    ✓ Found: {title[:50]}...")
 
         except Exception as e:
             logger.error(f"Error scraping CNBC: {e}")
 
-        logger.info(f"Scraped {len(articles)} articles from CNBC")
+        logger.info(f"Found {len(articles)} articles from CNBC")
         return articles
+
+    def fetch_full_article(self, url: str, source: str = "CNBC") -> Optional[Dict]:
+        """
+        指定されたURLから記事の全文を取得（OpenAI拡充含む）
+
+        Args:
+            url: 記事URL
+            source: ソース名（"CNBC" or "Yahoo!ファイナンス"）
+
+        Returns:
+            記事情報の辞書（title, summary, content, source, url, published_at）
+        """
+        if source == "CNBC":
+            return self._fetch_cnbc_article(url)
+        elif source == "Yahoo!ファイナンス":
+            return self._fetch_yahoo_article(url)
+        else:
+            logger.error(f"Unknown source: {source}")
+            return None
 
     def _fetch_cnbc_article(self, url: str) -> Optional[Dict]:
         """CNBCの記事詳細を取得"""
@@ -132,9 +157,9 @@ class NewsScraper:
 
             summary = "\n".join(content_paragraphs[:2]) if len(content_paragraphs) >= 2 else content[:300]
 
-            # OpenAI APIで記事内容を拡充
+            # OpenAI APIで記事内容を拡充（全文を渡す）
             if self.use_openai_enhancement:
-                content = self._enhance_content_with_openai(title, summary, url, "CNBC")
+                content = self._enhance_content_with_openai(title, content, url, "CNBC")
 
             return {
                 "title": title,
@@ -151,19 +176,19 @@ class NewsScraper:
 
     def scrape_yahoo_finance(self, max_articles: int = 10) -> List[Dict]:
         """
-        Yahoo!ファイナンスから記事をスクレイピング
+        Yahoo!ファイナンスから記事をスクレイピング（軽量版：URLとタイトルのみ）
 
         Args:
             max_articles: 取得する最大記事数
 
         Returns:
-            記事情報のリスト
+            記事情報のリスト（url, title, summary, source, published_at）
         """
         articles = []
         base_url = "https://finance.yahoo.co.jp"
         url = base_url + "/news"
 
-        logger.info(f"Scraping Yahoo! Finance for {max_articles} articles...")
+        logger.info(f"Scraping Yahoo! Finance for {max_articles} articles (lightweight)...")
 
         try:
             logger.info(f"  Scraping: {url}")
@@ -190,18 +215,24 @@ class NewsScraper:
                     if any(a["url"] == full_url for a in articles):
                         continue
 
-                    # 記事詳細を取得
-                    article = self._fetch_yahoo_article(full_url)
-                    if article:
-                        articles.append(article)
-                        logger.info(f"    ✓ Added: {article['title'][:50]}...")
+                    # タイトルを取得（リンクテキストから）
+                    title = link.get_text(strip=True)
 
-                    time.sleep(random.uniform(1.0, 2.0))  # レート制限対策（1-2秒のランダム待機）
+                    if title and len(title) > 10:
+                        articles.append({
+                            "title": title,
+                            "summary": "",  # 軽量版では空
+                            "content": "",  # 軽量版では空
+                            "source": "Yahoo!ファイナンス",
+                            "url": full_url,
+                            "published_at": datetime.now(pytz.UTC),
+                        })
+                        logger.info(f"    ✓ Found: {title[:50]}...")
 
         except Exception as e:
             logger.error(f"Error scraping Yahoo! Finance: {e}")
 
-        logger.info(f"Scraped {len(articles)} articles from Yahoo! Finance")
+        logger.info(f"Found {len(articles)} articles from Yahoo! Finance")
         return articles
 
     def _fetch_yahoo_article(self, url: str) -> Optional[Dict]:
@@ -238,9 +269,9 @@ class NewsScraper:
 
             summary = "\n".join(content_paragraphs[:2]) if len(content_paragraphs) >= 2 else content[:300]
 
-            # OpenAI APIで記事内容を拡充
+            # OpenAI APIで記事内容を拡充（全文を渡す）
             if self.use_openai_enhancement:
-                content = self._enhance_content_with_openai(title, summary, url, "Yahoo!ファイナンス")
+                content = self._enhance_content_with_openai(title, content, url, "Yahoo!ファイナンス")
 
             return {
                 "title": title,
@@ -255,10 +286,10 @@ class NewsScraper:
             logger.debug(f"Error fetching Yahoo! Finance article {url}: {e}")
             return None
 
-    def _enhance_content_with_openai(self, title: str, summary: str, url: str, source: str) -> str:
+    def _enhance_content_with_openai(self, title: str, content: str, url: str, source: str) -> str:
         """OpenAI APIで記事内容を拡充"""
         if not self.use_openai_enhancement:
-            return summary
+            return content
 
         try:
             prompt = f"""以下の実際のニュース記事について、より詳細で分かりやすい解説記事（1200-1500文字）を日本語で作成してください。
@@ -267,7 +298,7 @@ class NewsScraper:
 タイトル: {title}
 ソース: {source}
 URL: {url}
-要約: {summary}
+本文: {content}
 
 【指示】
 1. 元記事の内容を基に、より詳細で分かりやすい解説記事を作成してください
@@ -303,7 +334,7 @@ URL: {url}
 
         except Exception as e:
             logger.error(f"Error enhancing content with OpenAI: {e}")
-            return summary
+            return content
 
     def fetch_articles(self, max_articles: int = 20, include_international: bool = True) -> List[Dict]:
         """

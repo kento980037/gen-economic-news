@@ -62,6 +62,7 @@ class ScriptGenerator:
 
         # 文字数を時間から計算（日本語: 1秒あたり約5-6文字、余裕を持って5文字）
         target_chars = target_duration * 5
+        logger.info(f"Target duration: {target_duration} seconds, Target chars: {target_chars} characters")
 
         # プロンプトを構築
         user_prompt = self._build_prompt(
@@ -87,7 +88,7 @@ class ScriptGenerator:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=4096,
+                max_tokens=16384,  # 2700文字（日本語）の生成に必要（約8000-10000トークン）
                 temperature=0.7,
             )
 
@@ -134,7 +135,7 @@ class ScriptGenerator:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=4096,
+                max_tokens=16384,  # 2700文字（日本語）の生成に必要（約8000-10000トークン）
                 temperature=0.7,
             )
 
@@ -169,11 +170,13 @@ class ScriptGenerator:
 公開日時: {news_article.get('published_at', '')}
 
 【台本要件】
-- 文字数: {target_chars}文字前後（各ポイントをしっかり深掘りしてください）
+⚠️ **超重要**: 必ず{target_chars}文字以上の台本を作成してください
+- 文字数: {target_chars}文字前後（最低でも{target_chars}文字は必須）
 - 目標時間: 9分程度（1テーマあたり、じっくり解説）
 - スタイル: {self.style}（ポッドキャストナレーション形式）
 - トーン: {self.tone}
 - 重要: ポイント数は2-4のままで、各ポイントを深く、詳しく解説してください
+- 各ポイントは最低でも90-120秒分（450-600文字）の詳細な解説が必要です
 
 【YouTube金融ポッドキャストの台本作成10の鉄則】
 
@@ -601,7 +604,7 @@ class ScriptGenerator:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                max_tokens=4096,
+                max_tokens=16384,  # 2700文字（日本語）の生成に必要（約8000-10000トークン）
                 temperature=0.7,
             )
 

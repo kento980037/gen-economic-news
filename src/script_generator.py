@@ -45,7 +45,7 @@ class ScriptGenerator:
 
         Args:
             news_article: ニュース記事の辞書（NewsArticle.to_dict()の出力）
-            target_duration: 目標動画時間（秒）デフォルト180秒=3分
+            target_duration: 目標動画時間（秒）デフォルト540秒=9分
             additional_context: 追加のコンテキスト情報
 
         Returns:
@@ -170,7 +170,7 @@ class ScriptGenerator:
 
 【台本要件】
 - 文字数: {target_chars}文字前後（各ポイントをしっかり深掘りしてください）
-- 目標時間: 5〜10分（1テーマあたり、じっくり解説）
+- 目標時間: 9分程度（1テーマあたり、じっくり解説）
 - スタイル: {self.style}（ポッドキャストナレーション形式）
 - トーン: {self.tone}
 - 重要: ポイント数は2-4のままで、各ポイントを深く、詳しく解説してください

@@ -85,7 +85,7 @@ class NewsFetcher:
 
         # News Scraper（Yahoo! Finance / CNBC から直接取得）- 最優先
         try:
-            self.news_scraper = NewsScraper(api_key=self.openai_api_key, use_openai_enhancement=True)
+            self.news_scraper = NewsScraper(api_key=self.openai_api_key, use_openai_enhancement=False)
         except Exception as e:
             logger.warning(f"NewsScraper initialization failed: {e}")
             self.news_scraper = None

@@ -146,7 +146,7 @@ class NewsFetcher:
         unique_articles = self._remove_duplicates(articles)
 
         # 本文が短すぎる記事を除外（Bloombergの有料記事など）
-        min_content_length = 200  # 最小200文字
+        min_content_length = 100  # 最小100文字（軽量版では要約のみなので閾値を下げる）
         articles_with_content = []
         for article in unique_articles:
             content_length = len(article.content or "")

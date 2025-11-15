@@ -48,7 +48,7 @@ class NewsScraper:
 
     def scrape_cnbc(self, max_articles: int = 10) -> List[Dict]:
         """
-        CNBCから記事をスクレイピング（軽量版：URLとタイトルのみ）
+        CNBCから記事をスクレイピング（軽量版：タイトルと要約のみ取得）
 
         Args:
             max_articles: 取得する最大記事数
@@ -87,25 +87,64 @@ class NewsScraper:
                     if any(a["url"] == full_url for a in articles):
                         continue
 
-                    # タイトルを取得（リンクテキストから）
-                    title = link.get_text(strip=True)
-
-                    if title and len(title) > 10:
-                        articles.append({
-                            "title": title,
-                            "summary": "",  # 軽量版では空
-                            "content": "",  # 軽量版では空
-                            "source": "CNBC",
-                            "url": full_url,
-                            "published_at": datetime.now(pytz.UTC),
-                        })
-                        logger.info(f"    ✓ Found: {title[:50]}...")
+                    # 記事ページから正確なタイトルと要約を取得（全文は取得しない）
+                    article = self._fetch_cnbc_article_lightweight(full_url)
+                    if article:
+                        articles.append(article)
+                        logger.info(f"    ✓ Found: {article['title'][:50]}...")
+                        time.sleep(random.uniform(1.0, 2.0))  # レート制限対策
 
         except Exception as e:
             logger.error(f"Error scraping CNBC: {e}")
 
         logger.info(f"Found {len(articles)} articles from CNBC")
         return articles
+
+    def _fetch_cnbc_article_lightweight(self, url: str) -> Optional[Dict]:
+        """CNBCの記事タイトルと要約のみを取得（全文は取得しない）"""
+        try:
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, "html.parser")
+
+            # タイトル
+            title = ""
+            title_tag = soup.find("h1")
+            if title_tag:
+                title = title_tag.get_text(strip=True)
+
+            # 要約（最初の2段落のみ）
+            content_paragraphs = []
+            article_body = soup.find("div", class_="ArticleBody-articleBody")
+            if article_body:
+                paragraphs = article_body.find_all("p")
+                for i, p in enumerate(paragraphs):
+                    if i >= 2:  # 最初の2段落だけ
+                        break
+                    text = p.get_text(strip=True)
+                    if len(text) > 50:
+                        content_paragraphs.append(text)
+
+            summary = "\n".join(content_paragraphs) if content_paragraphs else ""
+
+            if not title or len(summary) < 100:
+                return None
+
+            logger.debug(f"    Lightweight fetch - Title: {title[:50]}..., Summary length: {len(summary)} chars")
+
+            return {
+                "title": title,
+                "summary": summary[:500],
+                "content": summary,  # 軽量版では要約をcontentとして使用
+                "source": "CNBC",
+                "url": url,
+                "published_at": datetime.now(pytz.UTC),
+            }
+
+        except Exception as e:
+            logger.debug(f"Error fetching CNBC article {url}: {e}")
+            return None
 
     def fetch_full_article(self, url: str, source: str = "CNBC") -> Optional[Dict]:
         """
@@ -157,9 +196,15 @@ class NewsScraper:
 
             summary = "\n".join(content_paragraphs[:2]) if len(content_paragraphs) >= 2 else content[:300]
 
+            logger.info(f"    Full article scraped - {len(content)} chars")
+            logger.debug(f"    Article preview: {content[:200]}...")
+
             # OpenAI APIで記事内容を拡充（全文を渡す）
             if self.use_openai_enhancement:
+                logger.info(f"    Enhancing with OpenAI...")
                 content = self._enhance_content_with_openai(title, content, url, "CNBC")
+                logger.info(f"    Enhanced content: {len(content)} chars")
+                logger.debug(f"    Enhanced preview: {content[:200]}...")
 
             return {
                 "title": title,
@@ -176,7 +221,7 @@ class NewsScraper:
 
     def scrape_yahoo_finance(self, max_articles: int = 10) -> List[Dict]:
         """
-        Yahoo!ファイナンスから記事をスクレイピング（軽量版：URLとタイトルのみ）
+        Yahoo!ファイナンスから記事をスクレイピング（軽量版：タイトルと要約のみ取得）
 
         Args:
             max_articles: 取得する最大記事数
@@ -215,25 +260,67 @@ class NewsScraper:
                     if any(a["url"] == full_url for a in articles):
                         continue
 
-                    # タイトルを取得（リンクテキストから）
-                    title = link.get_text(strip=True)
-
-                    if title and len(title) > 10:
-                        articles.append({
-                            "title": title,
-                            "summary": "",  # 軽量版では空
-                            "content": "",  # 軽量版では空
-                            "source": "Yahoo!ファイナンス",
-                            "url": full_url,
-                            "published_at": datetime.now(pytz.UTC),
-                        })
-                        logger.info(f"    ✓ Found: {title[:50]}...")
+                    # 記事ページから正確なタイトルと要約を取得（全文は取得しない）
+                    article = self._fetch_yahoo_article_lightweight(full_url)
+                    if article:
+                        articles.append(article)
+                        logger.info(f"    ✓ Found: {article['title'][:50]}...")
+                        time.sleep(random.uniform(1.0, 2.0))  # レート制限対策
 
         except Exception as e:
             logger.error(f"Error scraping Yahoo! Finance: {e}")
 
         logger.info(f"Found {len(articles)} articles from Yahoo! Finance")
         return articles
+
+    def _fetch_yahoo_article_lightweight(self, url: str) -> Optional[Dict]:
+        """Yahoo!ファイナンスの記事タイトルと要約のみを取得（全文は取得しない）"""
+        try:
+            response = self.session.get(url, timeout=15)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, "html.parser")
+
+            # タイトル
+            title = ""
+            title_tag = soup.find("h1")
+            if title_tag:
+                title = title_tag.get_text(strip=True)
+
+            # 要約（最初の2段落のみ）
+            content_paragraphs = []
+            article_body = soup.find("div", class_="article-body")
+            if not article_body:
+                article_body = soup.find("article")
+
+            if article_body:
+                paragraphs = article_body.find_all("p")
+                for i, p in enumerate(paragraphs):
+                    if i >= 2:  # 最初の2段落だけ
+                        break
+                    text = p.get_text(strip=True)
+                    if len(text) > 30:
+                        content_paragraphs.append(text)
+
+            summary = "\n".join(content_paragraphs) if content_paragraphs else ""
+
+            if not title or len(summary) < 100:
+                return None
+
+            logger.debug(f"    Lightweight fetch - Title: {title[:50]}..., Summary length: {len(summary)} chars")
+
+            return {
+                "title": title,
+                "summary": summary[:500],
+                "content": summary,  # 軽量版では要約をcontentとして使用
+                "source": "Yahoo!ファイナンス",
+                "url": url,
+                "published_at": datetime.now(pytz.UTC),
+            }
+
+        except Exception as e:
+            logger.debug(f"Error fetching Yahoo! Finance article {url}: {e}")
+            return None
 
     def _fetch_yahoo_article(self, url: str) -> Optional[Dict]:
         """Yahoo!ファイナンスの記事詳細を取得"""
@@ -269,9 +356,15 @@ class NewsScraper:
 
             summary = "\n".join(content_paragraphs[:2]) if len(content_paragraphs) >= 2 else content[:300]
 
+            logger.info(f"    Full article scraped - {len(content)} chars")
+            logger.debug(f"    Article preview: {content[:200]}...")
+
             # OpenAI APIで記事内容を拡充（全文を渡す）
             if self.use_openai_enhancement:
+                logger.info(f"    Enhancing with OpenAI...")
                 content = self._enhance_content_with_openai(title, content, url, "Yahoo!ファイナンス")
+                logger.info(f"    Enhanced content: {len(content)} chars")
+                logger.debug(f"    Enhanced preview: {content[:200]}...")
 
             return {
                 "title": title,

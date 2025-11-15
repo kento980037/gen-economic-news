@@ -796,56 +796,47 @@ class NewsFetcher:
             # 本文があれば使用、なければ要約を使用
             article_content = main_article.content if main_article.content and len(main_article.content) > 100 else main_article.summary
 
-            prompt = f"""以下の金融ニュース記事を分析し、「情報を補足すべき重要キーワード」を{max_keywords}個抽出してください。
+            prompt = f"""Analyze the following financial news article and extract {max_keywords} important keywords for searching related articles.
 
-【記事情報】
-タイトル: {main_article.title}
-本文: {article_content[:1500]}
+【Article Information】
+Title: {main_article.title}
+Content: {article_content[:1500]}
 
-【抽出基準】
-この記事を理解するために、追加の背景情報や詳細な解説が必要な要素を特定してください：
+【Extraction Criteria】
+Identify elements that need additional background information or detailed explanation:
 
-1. **企業名・組織名**
-   - 例: 「NVIDIA」「トヨタ自動車」「日本銀行」「FRB」
-   - 記事で言及されているが、その企業の事業内容・業績・戦略などの背景情報が不足している場合
+1. **Company/Organization Names**
+   - Examples: "NVIDIA", "Bank of England", "Federal Reserve"
 
-2. **専門用語・経済概念**
-   - 例: 「量的緩和」「PER」「AI半導体」「サプライチェーン」
-   - 記事で使われているが、その意味や仕組みの詳しい説明がない場合
+2. **Technical Terms/Economic Concepts**
+   - Examples: "quantitative easing", "inflation rate", "unemployment"
 
-3. **経済指標・統計データ**
-   - 例: 「CPI」「GDP」「失業率」「PMI」
-   - 記事で数字が出ているが、その指標の意味や重要性の説明が不足している場合
+3. **Economic Indicators/Statistics**
+   - Examples: "CPI", "GDP", "PMI"
 
-4. **政策・制度・規制**
-   - 例: 「ゼロ金利政策」「インボイス制度」「関税政策」
-   - 記事で触れられているが、その背景や影響の詳細が不明な場合
+4. **Policies/Regulations**
+   - Examples: "interest rate policy", "tariffs"
 
-5. **人物名（役職付き）**
-   - 例: 「パウエルFRB議長」「植田日銀総裁」「イーロン・マスク」
-   - 記事で名前が出ているが、その人物の経歴や立場の説明が不足している場合
+5. **Key People (with title)**
+   - Examples: "Jerome Powell", "Treasury Secretary"
 
-6. **製品・サービス・技術**
-   - 例: 「ChatGPT」「iPhone 15」「自動運転技術」
-   - 記事で言及されているが、その詳細や市場への影響が不明な場合
+6. **Products/Services/Technology**
+   - Examples: "AI technology", "cryptocurrency"
 
-【重要】
-- 一般的すぎる単語（「市場」「株価」「経済」「企業」「投資」など）は避ける
-- 記事で既に十分に説明されている要素は除外する
-- 具体的で検索可能なキーワードを選ぶ
-- 関連記事を検索する際に有用なキーワードを選ぶ
-- 視聴者にとって「もっと詳しく知りたい」と思える要素を優先
+【Important】
+- Avoid generic words like "market", "economy", "investment"
+- Choose specific, searchable keywords
+- Keywords must be in ENGLISH only (not Japanese)
+- Prioritize keywords useful for finding related articles on CNBC
 
-【出力形式】
-各行に1つずつキーワードを出力してください（説明は不要）。
-重要度順に並べてください。
+【Output Format】
+Output one keyword per line (no explanations).
+Order by importance.
 
-例:
-NVIDIA
-量的緩和政策
-AI半導体市場
-パウエルFRB議長
-CPI（消費者物価指数）
+Example:
+Bank of England
+unemployment rate
+interest rate policy
 """
 
             response = self.openai_client.chat.completions.create(
@@ -853,7 +844,7 @@ CPI（消費者物価指数）
                 messages=[
                     {
                         "role": "system",
-                        "content": "あなたは金融ニュース分析の専門家です。記事から「情報を補足すべき重要キーワード」を抽出してください。"
+                        "content": "You are a financial news analyst. Extract important keywords IN ENGLISH ONLY for searching related articles."
                     },
                     {"role": "user", "content": prompt}
                 ],

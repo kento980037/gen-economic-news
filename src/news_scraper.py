@@ -492,15 +492,16 @@ URL: {url}
                 if any(a["url"] == url for a in articles):
                     continue
 
-                # 軽量版として要約をそのまま使用（詳細取得はしない）
+                # 記事情報を追加（URLのみ、全文は後で取得）
                 if title and summary and len(summary) > 50:
                     articles.append({
                         "title": title,
                         "summary": summary[:500],
-                        "content": summary,  # 軽量版では要約をcontentとして使用
+                        "content": "",  # 空にしておく（後で全文取得）
                         "source": "CNBC",
                         "url": url,
                         "published_at": datetime.now(pytz.UTC),
+                        "needs_full_content": True,  # 全文取得が必要なフラグ
                     })
                     logger.info(f"    ✓ Found: {title[:50]}...")
 

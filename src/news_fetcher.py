@@ -12,6 +12,8 @@ import requests
 from bs4 import BeautifulSoup
 import pytz
 import numpy as np
+import time
+import random
 from openai import OpenAI
 from openai_news_fetcher import OpenAINewsFetcher
 from news_scraper import NewsScraper
@@ -684,7 +686,7 @@ class NewsFetcher:
 
         try:
             # OpenAI APIを使って重要キーワードを抽出
-            keywords = self._extract_important_keywords(main_article, max_keywords=3)
+            keywords = self._extract_important_keywords(main_article, max_keywords=10)
 
             if not keywords:
                 logger.warning("No keywords extracted from main article")
@@ -702,7 +704,7 @@ class NewsFetcher:
                 # CNBC Queryly APIで記事を検索
                 search_results = self.news_scraper.search_cnbc_articles(
                     query=keyword,
-                    max_articles=max_related // len(keywords) + 2  # キーワードごとに数記事
+                    max_articles=2  # キーワードごとに2記事
                 )
 
                 # NewsArticleオブジェクトに変換
@@ -717,6 +719,21 @@ class NewsFetcher:
                     # 既に追加済みの記事はスキップ
                     if any(a.url == article_dict["url"] for a in all_related_articles):
                         continue
+
+                    # 全文取得が必要な場合は取得
+                    if article_dict.get("needs_full_content", False):
+                        logger.info(f"    Fetching full content for related article: {article_dict['title'][:50]}...")
+                        full_article = self.news_scraper.fetch_full_article(
+                            url=article_dict["url"],
+                            source=article_dict["source"]
+                        )
+                        if full_article:
+                            article_dict["content"] = full_article["content"]
+                            article_dict["summary"] = full_article["summary"]
+                            logger.info(f"      ✓ Retrieved {len(full_article['content'])} chars")
+
+                        # レート制限対策
+                        time.sleep(random.uniform(1.0, 2.0))
 
                     article = NewsArticle(
                         title=article_dict["title"],

@@ -196,8 +196,8 @@ class ScriptGenerator:
             "いいね・チャンネル登録のお願い。親しみやすく、押し付けがましくなく。最後は「良い投資を！」で締める。"
         )
 
-        # セクションを結合
-        full_script = "\n\n".join([
+        # セクションを結合（改行1つで連結、音声のポーズを短く）
+        full_script = "\n".join([
             sections['opening'],
             sections['point1'],
             sections['point2'],

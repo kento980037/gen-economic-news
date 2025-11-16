@@ -429,7 +429,7 @@ URL: {url}
             logger.error(f"Error enhancing content with OpenAI: {e}")
             return content
 
-    def search_cnbc_articles(self, query: str, max_articles: int = 10) -> List[Dict]:
+    def search_cnbc_articles(self, query: str, max_articles: int = 10, max_age_days: int = 30) -> List[Dict]:
         """
         CNBCの検索API（Queryly）を使って記事を取得
 
@@ -441,13 +441,14 @@ URL: {url}
         Args:
             query: 検索クエリ（キーワード）
             max_articles: 取得する最大記事数
+            max_age_days: 記事の最大経過日数（デフォルト30日）
 
         Returns:
             記事情報のリスト
         """
         articles = []
 
-        logger.info(f"Searching CNBC via Queryly API for '{query}' (max {max_articles} articles)...")
+        logger.info(f"Searching CNBC via Queryly API for '{query}' (max {max_articles} articles, within {max_age_days} days)...")
 
         try:
             # Queryly API を使用（CNBCのWebサイトで使用されている公開API）
@@ -475,6 +476,11 @@ URL: {url}
             results = data['results']
             logger.info(f"  API returned {len(results)} results")
 
+            # 現在時刻（日付フィルタ用）
+            from datetime import timedelta
+            now = datetime.now(pytz.UTC)
+            cutoff_date = now - timedelta(days=max_age_days)
+
             # 各結果から記事情報を抽出
             for result in results:
                 if len(articles) >= max_articles:
@@ -492,6 +498,32 @@ URL: {url}
                 if any(a["url"] == url for a in articles):
                     continue
 
+                # 公開日時を取得（複数のフィールドを試す）
+                published_at = None
+                for date_field in ['pubdate', 'published', 'datePublished', 'cn:pubdate', 'created']:
+                    date_str = result.get(date_field)
+                    if date_str:
+                        try:
+                            # ISO 8601形式または一般的な形式をパース
+                            from dateutil import parser as date_parser
+                            published_at = date_parser.parse(date_str)
+                            if published_at.tzinfo is None:
+                                published_at = pytz.UTC.localize(published_at)
+                            break
+                        except Exception as e:
+                            logger.debug(f"Failed to parse date from field '{date_field}': {date_str} - {e}")
+                            continue
+
+                # 日付が取得できなかった場合は現在時刻を使用（ログに警告）
+                if not published_at:
+                    logger.warning(f"Could not extract published date for article: {title[:50]}... (using current time)")
+                    published_at = now
+
+                # 古い記事を除外
+                if published_at < cutoff_date:
+                    logger.debug(f"Skipping old article (published {published_at.strftime('%Y-%m-%d')}): {title[:50]}...")
+                    continue
+
                 # 記事情報を追加（URLのみ、全文は後で取得）
                 if title and summary and len(summary) > 50:
                     articles.append({
@@ -500,15 +532,15 @@ URL: {url}
                         "content": "",  # 空にしておく（後で全文取得）
                         "source": "CNBC",
                         "url": url,
-                        "published_at": datetime.now(pytz.UTC),
+                        "published_at": published_at,
                         "needs_full_content": True,  # 全文取得が必要なフラグ
                     })
-                    logger.info(f"    ✓ Found: {title[:50]}...")
+                    logger.info(f"    ✓ Found: {title[:50]}... (published: {published_at.strftime('%Y-%m-%d')})")
 
         except Exception as e:
             logger.error(f"Error searching CNBC via Queryly API for '{query}': {e}")
 
-        logger.info(f"Found {len(articles)} articles from CNBC search")
+        logger.info(f"Found {len(articles)} articles from CNBC search (after date filtering)")
         return articles
 
     def fetch_articles(self, max_articles: int = 20, include_international: bool = True) -> List[Dict]:

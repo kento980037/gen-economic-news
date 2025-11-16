@@ -251,7 +251,8 @@ class VideoGenerationPipeline:
         else:
             logger.warning("No related articles found, using main article only")
 
-        return self.script_generator.generate_script(
+        # セクション分割生成を使用（確実に目標文字数を達成）
+        return self.script_generator.generate_script_by_sections(
             news_article.to_dict(),
             target_duration=target_duration,
             additional_context=additional_context

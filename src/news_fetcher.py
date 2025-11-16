@@ -686,7 +686,7 @@ class NewsFetcher:
 
         try:
             # OpenAI APIを使って重要キーワードを抽出
-            keywords = self._extract_important_keywords(main_article, max_keywords=10)
+            keywords = self._extract_important_keywords(main_article, max_keywords=15)
 
             if not keywords:
                 logger.warning("No keywords extracted from main article")
@@ -704,7 +704,7 @@ class NewsFetcher:
                 # CNBC Queryly APIで記事を検索
                 search_results = self.news_scraper.search_cnbc_articles(
                     query=keyword,
-                    max_articles=2  # キーワードごとに2記事
+                    max_articles=3  # キーワードごとに3記事
                 )
 
                 # NewsArticleオブジェクトに変換

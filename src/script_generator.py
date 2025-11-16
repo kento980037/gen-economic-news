@@ -243,7 +243,7 @@ class ScriptGenerator:
     def generate_script_chill(
         self,
         news_article: Dict,
-        target_duration: int = 360,  # 5-7分 = 300-420秒、中央値360秒
+        target_duration: int = 720,  # 10-15分 = 600-900秒、中央値720秒
         additional_context: Optional[str] = None,
     ) -> Dict:
         """
@@ -251,7 +251,7 @@ class ScriptGenerator:
 
         Args:
             news_article: ニュース記事の辞書
-            target_duration: 目標動画時間（秒）デフォルト360秒=6分
+            target_duration: 目標動画時間（秒）デフォルト720秒=12分
             additional_context: 追加のコンテキスト情報
 
         Returns:
@@ -260,7 +260,7 @@ class ScriptGenerator:
         logger.info(f"Generating chill podcast script for: {news_article.get('title', 'Unknown')}")
 
         # 文字数を時間から計算（日本語: 1秒あたり約5文字）
-        target_chars = target_duration * 5  # 360秒 × 5 = 1800文字
+        target_chars = target_duration * 5  # 720秒 × 5 = 3600文字
         logger.info(f"Target duration: {target_duration} seconds, Target chars: {target_chars} characters")
 
         # 記事情報の準備
@@ -294,8 +294,10 @@ B: まあ、簡単に言うと〜ってことですね
 
 上記のニュース記事をもとに、夜にお酒を飲みながら聞ける"ゆるくてチルい"雰囲気のYouTubeポッドキャスト用の台本を作ってください。
 
+**⚠️ 最重要要件: 必ず{target_chars}文字以上の台本を作成してください ⚠️**
+
 **台本の要件**
-- 長さ: {target_chars}文字程度（5〜7分相当）
+- **長さ: {target_chars}文字以上（10〜15分相当）← 必須！短いのはNG**
 - トーン: 深夜ラジオ風、友達と話すような自然な口調
 - 構成: システムプロンプトに従った7セクション構成
 - スタイル: {"2人の掛け合い（ボケ＆ツッコミ）" if self.style == "dialogue" else "単独ナレーション"}
@@ -306,6 +308,9 @@ B: まあ、簡単に言うと〜ってことですね
 - 硬い専門用語には軽く一言説明を入れる
 - AIっぽさを消して"話してる感じ"で書く
 - 具体的な企業名・数字・日付は正確に（記事に基づく）
+- **会話を増やす**: やりとりを多くして、十分な長さを確保
+- **深掘りする**: 一つのトピックについて、複数の角度から話す
+- **具体例を複数**: 過去事例、他社比較、市場反応など
 
 【出力形式】
 以下の形式で出力してください:
@@ -381,7 +386,7 @@ B: まあ、簡単に言うと〜ってことですね
             # ゆるチル系の場合は専用メソッドを使用
             return self.generate_script_chill(
                 news_article=news_article,
-                target_duration=target_duration if target_duration != 1080 else 360,  # デフォルトを6分に
+                target_duration=target_duration if target_duration != 1080 else 720,  # デフォルトを12分に
                 additional_context=additional_context
             )
 

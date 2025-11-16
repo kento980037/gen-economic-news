@@ -75,7 +75,7 @@ class ScriptGenerator:
             )
 
             # 初回以外は文字数不足を指摘
-            if attempt > 0:
+            if attempt > 0 and result is not None:
                 logger.warning(f"Retry {attempt}/{max_retries}: Previous script was too short ({len(result['script'])} chars)")
                 user_prompt = f"""前回の台本が短すぎました（{len(result['script'])}文字）。
 
@@ -110,7 +110,7 @@ class ScriptGenerator:
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
-                    max_tokens=20000,  # 出力余裕を持たせる（約10,000文字分）
+                    max_tokens=16384,  # gpt-4o-miniの最大値
                     temperature=0.5,  # 指示に従いやすくする
                 )
 

@@ -32,7 +32,15 @@ class ScriptGenerator:
         self.max_length = config.get("max_length", 2000)
         self.tone = config.get("tone", "professional")
         self.style = config.get("style", "narration")
-        self.system_prompt = config.get("system_prompt", "")
+
+        # toneとstyleの組み合わせに応じてsystem_promptを選択
+        if self.tone == "chill":
+            if self.style == "dialogue":
+                self.system_prompt = config.get("system_prompt_chill_dialogue", "")
+            else:
+                self.system_prompt = config.get("system_prompt_chill", "")
+        else:
+            self.system_prompt = config.get("system_prompt", "")
 
     def generate_script_by_sections(
         self,
@@ -232,6 +240,114 @@ class ScriptGenerator:
             "generated_at": datetime.now().isoformat(),
         }
 
+    def generate_script_chill(
+        self,
+        news_article: Dict,
+        target_duration: int = 360,  # 5-7分 = 300-420秒、中央値360秒
+        additional_context: Optional[str] = None,
+    ) -> Dict:
+        """
+        ゆるチル系ポッドキャスト台本を生成（夜にお酒を飲みながら聞ける）
+
+        Args:
+            news_article: ニュース記事の辞書
+            target_duration: 目標動画時間（秒）デフォルト360秒=6分
+            additional_context: 追加のコンテキスト情報
+
+        Returns:
+            生成された台本の辞書
+        """
+        logger.info(f"Generating chill podcast script for: {news_article.get('title', 'Unknown')}")
+
+        # 文字数を時間から計算（日本語: 1秒あたり約5文字）
+        target_chars = target_duration * 5  # 360秒 × 5 = 1800文字
+        logger.info(f"Target duration: {target_duration} seconds, Target chars: {target_chars} characters")
+
+        # 記事情報の準備
+        article_content = news_article.get('content', '')
+        if not article_content or len(article_content.strip()) < 50:
+            article_content = news_article.get('summary', '')
+
+        article_info = f"""【メイン記事】
+タイトル: {news_article.get('title', '')}
+本文: {article_content}
+ソース: {news_article.get('source', '')}
+公開日時: {news_article.get('published_at', '')}
+"""
+        if additional_context:
+            article_info += f"\n【関連記事】\n{additional_context}\n"
+
+        # ゆるチル系専用プロンプト（dialogueかnarrationで出力形式が変わる）
+        if self.style == "dialogue":
+            script_format = """[会話形式で、発言者（A:、B:）を明記。セクション名は書かない。]
+
+例:
+A: はい、今夜もやってきましたー
+B: どうもー。今日も一杯やりながらですね
+A: 今日のニュース、なんかすごいことになってますよ
+B: まあ、簡単に言うと〜ってことですね
+..."""
+        else:
+            script_format = "[純粋なナレーション原稿のみ。セクション名は書かない。]"
+
+        user_prompt = f"""{article_info}
+
+上記のニュース記事をもとに、夜にお酒を飲みながら聞ける"ゆるくてチルい"雰囲気のYouTubeポッドキャスト用の台本を作ってください。
+
+**台本の要件**
+- 長さ: {target_chars}文字程度（5〜7分相当）
+- トーン: 深夜ラジオ風、友達と話すような自然な口調
+- 構成: システムプロンプトに従った7セクション構成
+- スタイル: {"2人の掛け合い（ボケ＆ツッコミ）" if self.style == "dialogue" else "単独ナレーション"}
+
+**お願い**
+- 記事本文の文章はそのまま読まず、要点を再構成して語り口調に
+- 難しい部分はゆるい言葉に置き換える
+- 硬い専門用語には軽く一言説明を入れる
+- AIっぽさを消して"話してる感じ"で書く
+- 具体的な企業名・数字・日付は正確に（記事に基づく）
+
+【出力形式】
+以下の形式で出力してください:
+
+## タイトル
+[15-35文字のカジュアルなタイトル]
+
+## 台本
+{script_format}
+
+## キーワード
+[カンマ区切りで5-10個]
+"""
+
+        try:
+            # OpenAI APIを呼び出し
+            messages = [{"role": "user", "content": user_prompt}]
+            if self.system_prompt:
+                messages.insert(0, {"role": "system", "content": self.system_prompt})
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                max_tokens=16384,
+                temperature=0.7,  # ゆるチル系は少し高めの温度で自然さを出す
+            )
+
+            # レスポンスからテキストを抽出
+            script_text = response.choices[0].message.content
+
+            # 台本を解析
+            result = self._parse_script_response(script_text, news_article)
+
+            script_length = len(result['script'])
+            logger.info(f"✓ Chill script generated. Length: {script_length} chars (target: {target_chars})")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error generating chill script: {e}")
+            raise
+
     def generate_script(
         self,
         news_article: Dict,
@@ -240,7 +356,7 @@ class ScriptGenerator:
         max_retries: int = 2,
     ) -> Dict:
         """
-        ニュース記事から台本を生成
+        ニュース記事から台本を生成（toneに応じて適切なメソッドを呼び出す）
 
         Args:
             news_article: ニュース記事の辞書（NewsArticle.to_dict()の出力）
@@ -259,6 +375,15 @@ class ScriptGenerator:
             }
         """
         logger.info(f"Generating script for: {news_article.get('title', 'Unknown')}")
+
+        # toneに応じて適切なメソッドを呼び出す
+        if self.tone == "chill":
+            # ゆるチル系の場合は専用メソッドを使用
+            return self.generate_script_chill(
+                news_article=news_article,
+                target_duration=target_duration if target_duration != 1080 else 360,  # デフォルトを6分に
+                additional_context=additional_context
+            )
 
         # 文字数を時間から計算（日本語: 1秒あたり約5-6文字、余裕を持って5文字）
         target_chars = target_duration * 5

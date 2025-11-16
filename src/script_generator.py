@@ -39,6 +39,7 @@ class ScriptGenerator:
         news_article: Dict,
         target_duration: int = 1080,
         additional_context: Optional[str] = None,
+        max_retries: int = 2,
     ) -> Dict:
         """
         ニュース記事から台本を生成
@@ -47,6 +48,7 @@ class ScriptGenerator:
             news_article: ニュース記事の辞書（NewsArticle.to_dict()の出力）
             target_duration: 目標動画時間（秒）デフォルト1080秒=18分
             additional_context: 追加のコンテキスト情報
+            max_retries: 文字数不足時の最大再試行回数
 
         Returns:
             生成された台本の辞書
@@ -64,48 +66,82 @@ class ScriptGenerator:
         target_chars = target_duration * 5
         logger.info(f"Target duration: {target_duration} seconds, Target chars: {target_chars} characters")
 
-        # プロンプトを構築
-        user_prompt = self._build_prompt(
-            news_article, target_chars, additional_context
-        )
+        result = None
 
-        # プロンプトをログに出力
-        logger.info("=" * 80)
-        logger.info("SCRIPT GENERATION PROMPT")
-        logger.info("=" * 80)
-        if self.system_prompt:
-            logger.info(f"[SYSTEM PROMPT]\n{self.system_prompt}")
-            logger.info("-" * 80)
-        logger.info(f"[USER PROMPT]\n{user_prompt}")
-        logger.info("=" * 80)
-
-        try:
-            # OpenAI APIを呼び出し
-            messages = [{"role": "user", "content": user_prompt}]
-            if self.system_prompt:
-                messages.insert(0, {"role": "system", "content": self.system_prompt})
-
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=16384,  # 5400文字（日本語）の生成に必要（約8000-16000トークン）
-                temperature=0.7,
+        for attempt in range(max_retries + 1):
+            # プロンプトを構築
+            user_prompt = self._build_prompt(
+                news_article, target_chars, additional_context
             )
 
-            # レスポンスからテキストを抽出
-            script_text = response.choices[0].message.content
+            # 初回以外は文字数不足を指摘
+            if attempt > 0:
+                logger.warning(f"Retry {attempt}/{max_retries}: Previous script was too short ({len(result['script'])} chars)")
+                user_prompt = f"""前回の台本が短すぎました（{len(result['script'])}文字）。
 
-            # 台本を解析
-            result = self._parse_script_response(script_text, news_article)
+**必須要件**: 必ず{target_chars}文字以上の台本を作成してください。
 
-            logger.info(
-                f"Script generated successfully. Length: {len(result['script'])} chars"
-            )
-            return result
+{user_prompt}
 
-        except Exception as e:
-            logger.error(f"Error generating script: {e}")
-            raise
+【重要】各セクションをもっと詳しく書いてください：
+- 具体例を3つ以上追加
+- 過去事例との比較を詳しく
+- 数字やデータを豊富に使用
+- 専門家の見解を複数引用
+"""
+
+            # プロンプトをログに出力
+            if attempt == 0:
+                logger.info("=" * 80)
+                logger.info("SCRIPT GENERATION PROMPT")
+                logger.info("=" * 80)
+                if self.system_prompt:
+                    logger.info(f"[SYSTEM PROMPT]\n{self.system_prompt}")
+                    logger.info("-" * 80)
+                logger.info(f"[USER PROMPT]\n{user_prompt}")
+                logger.info("=" * 80)
+
+            try:
+                # OpenAI APIを呼び出し
+                messages = [{"role": "user", "content": user_prompt}]
+                if self.system_prompt:
+                    messages.insert(0, {"role": "system", "content": self.system_prompt})
+
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=20000,  # 出力余裕を持たせる（約10,000文字分）
+                    temperature=0.5,  # 指示に従いやすくする
+                )
+
+                # レスポンスからテキストを抽出
+                script_text = response.choices[0].message.content
+
+                # 台本を解析
+                result = self._parse_script_response(script_text, news_article)
+
+                script_length = len(result['script'])
+                logger.info(f"Script generated. Length: {script_length} chars (target: {target_chars})")
+
+                # 文字数チェック（目標の80%以上ならOK）
+                if script_length >= target_chars * 0.8:
+                    logger.info(f"✓ Script length is sufficient ({script_length}/{target_chars} chars)")
+                    return result
+                else:
+                    logger.warning(f"✗ Script is too short ({script_length}/{target_chars} chars, {script_length/target_chars*100:.1f}%)")
+                    if attempt < max_retries:
+                        logger.info(f"Retrying generation (attempt {attempt + 2}/{max_retries + 1})...")
+                    else:
+                        logger.warning("Max retries reached. Returning script as-is.")
+                        return result
+
+            except Exception as e:
+                logger.error(f"Error generating script: {e}")
+                if attempt == max_retries:
+                    raise
+                logger.info(f"Retrying after error (attempt {attempt + 2}/{max_retries + 1})...")
+
+        return result
 
     def generate_script_from_multiple_articles(
         self, news_articles: List[Dict], target_duration: int = 1080
@@ -154,189 +190,56 @@ class ScriptGenerator:
     def _build_prompt(
         self, news_article: Dict, target_chars: int, additional_context: Optional[str]
     ) -> str:
-        """単一記事用のプロンプトを構築"""
+        """単一記事用のプロンプトを構築（簡潔版）"""
 
         # 本文を優先、なければ要約を使用
         article_content = news_article.get('content', '')
         if not article_content or len(article_content.strip()) < 50:
             article_content = news_article.get('summary', '')
 
-        prompt = f"""⚠️⚠️⚠️ 最重要指示 ⚠️⚠️⚠️
-必ず{target_chars}文字以上の台本を作成してください。これは絶対に守るべき要件です。
-
-以下の金融ニュース記事を元に、YouTube金融ポッドキャスト用の台本を作成してください。
+        prompt = f"""⚠️ 最重要要件: 必ず{target_chars}文字以上の台本を作成してください ⚠️
 
 【メイン記事】
 タイトル: {news_article.get('title', '')}
 本文: {article_content}
 ソース: {news_article.get('source', '')}
 公開日時: {news_article.get('published_at', '')}
-
-【台本要件】
-⚠️ **超重要**: 必ず{target_chars}文字以上の台本を作成してください
-- 文字数: {target_chars}文字前後（最低でも{target_chars}文字は必須）
-- 目標時間: 18分程度（1テーマあたり、より詳しく解説）
-- スタイル: {self.style}（ポッドキャストナレーション形式）
-- トーン: {self.tone}
-- 重要: ポイント数は2-4のままで、各ポイントを深く、詳しく解説してください
-- 各ポイントは最低でも180-240秒分（900-1200文字）の詳細な解説が必要です
-
-【YouTube金融ポッドキャストの台本作成10の鉄則】
-
-✅ **1. 導入15秒で「今日の価値」を明示（超重要）**
-- 最初の15秒で結論を先に言う
-- 「今日のテーマは○○。結論は△△です」
-- 「これを知ると、今週の相場で〇〇を防げます」
-- 視聴者の離脱を防ぐため、冒頭で得られる価値を明確に
-
-✅ **2. 構成は「2〜4つのポイント」で柔軟に整理し、各ポイントを深く掘り下げる**
-内容の複雑さに応じてポイント数を調整する：
-
-【シンプルなニュース（2ポイント）】
-例：単一企業の決算発表、シンプルな価格変動
-1. 何が起きたか + なぜ重要か（120-180秒でしっかり解説）
-   - 具体的な数字と事実
-   - 過去のデータとの比較
-   - 専門家の見方や市場の反応
-2. 投資家への影響・今後の展開（120-180秒でしっかり解説）
-   - 短期的な影響
-   - 中長期的な見通し
-   - 類似ケースとの比較
-
-【標準的なニュース（3ポイント）】
-例：政策変更、市場動向、業界トレンド
-1. 結論（今日の重要ポイント）（120-180秒）
-   - 何が起きたのか詳細に
-   - なぜこれが重要なのか
-   - 具体例を複数挙げる
-2. 理由・背景（なぜそうなったか）（120-180秒）
-   - 主要な要因を深掘り
-   - 過去の経緯
-   - 他の関連要因
-3. 今後の展開・投資家への影響（120-180秒）
-   - 短期的な予測
-   - 中長期的な展望
-   - 投資家が取るべき行動
-
-【複雑なニュース（4ポイント）】
-例：複数要因が絡む市場変動、構造的変化
-1. 結論（今日の重要ポイント）（120秒）
-2. 主要因（最も重要な背景）（120-180秒で詳しく）
-3. 副要因（追加の背景・関連情報）（120-180秒で詳しく）
-4. 今後の展開・投資家への影響（120-180秒で詳しく）
-
-⚠️ **重要**:
-- 無理やり3つに合わせない！自然な情報の区切りを優先する
-- 各ポイントは120-180秒かけてしっかり深掘りする
-- 具体例、過去事例、数字を豊富に使って厚みのある解説にする
-
-✅ **3. 具体性を最優先する（最重要ルール）**
-
-抽象的な表現は禁止。必ず具体的な固有名詞と数字を使用：
-- 企業名、アナリスト名、機関名を明記
-- 数字は割合、金額、日付を正確に
-- 情報源に無い場合は捏造せず「詳細は不明」と述べる
-
-例：
-❌ 「テクノロジー株が急落」→ ✅ 「NVIDIAが8.2%下落、TSMCが5.7%下落」
-❌ 「専門家は懸念」→ ✅ 「ゴールドマン・サックスのチーフエコノミスト、ジャン・ハッチウス氏は」
-
-✅ **4. 深掘りと差別化**
-
-必ず含める：
-- なぜそうなったか（背景・原因を具体的に）
-- 過去の類似ケース（年月日と事例）
-- 投資家への具体的影響
-- 他国・他市場との比較
-
-✅ **5. 専門用語は必ず補足説明**
-直後に簡単な説明を入れる。例：「FRB（アメリカの中央銀行）」「CPI（消費者物価指数）」
-
-✅ **6. その他の重要ポイント**
-- 感情を5%混ぜる（「これは意外です」など）
-- 時系列でなく因果関係で構成
-- 数字は「変化」を強調（「前月より0.3ポイント上昇」）
-- 各ポイント120-180秒かけて深掘り
-
-✅ **7. 最後のまとめとCTA**
-締めくくり：
-- 今日のポイント2〜4つ（箇条書き風、本編と同じ数）
-- 投資や生活にどう活かせるか
-- 視聴者へのメッセージ
-
-✅ **8. 自然な話し言葉**
-「〜です、〜ます」調で短い文、読み上げやすいリズム。
-冒頭15秒で結論を先に言う。
-
 """
 
         if additional_context:
-            prompt += f"\n【追加コンテキスト（複数ソース参照）】\n{additional_context}\n"
-            prompt += """
-【複数記事参照時の追加要件】
-- 複数の情報源から得られた情報を統合的に分析してください
-- 各メディアの報道内容の共通点と相違点を考慮してください
-- より多角的で深い分析を提供してください
-- 情報の信頼性を高めるため、複数ソースで確認された事実を優先してください
+            prompt += f"\n【参考記事・コンテキスト】\n{additional_context}\n"
 
-【重要：トピックの一貫性チェック】
-⚠️ もし参考記事の中に明らかに異なるトピックが含まれている場合は、メイン記事と関連が深い記事のみを使用してください
-⚠️ 複数の無関係なトピック（例：タリフ、医療、市政など）を1つの台本に混ぜないでください
-⚠️ 1つの台本は1つの明確なテーマに集中してください
-"""
+        prompt += f"""
+【必須要件】
+1. **文字数**: {target_chars}文字以上（目標時間18分）
+2. **構成**: 2-4つのポイントで整理（各ポイント1200-1500文字）
+3. **具体性**: 企業名、数字、日付を必ず明記（抽象表現禁止）
+4. **専門用語**: 直後に説明を入れる（例: FRB（米国中央銀行））
+5. **深掘り**: 背景、過去事例、専門家見解を詳しく
 
-        prompt += """
+【構成例（各セクションの文字数を守ること）】
+- オープニング: 200文字（結論先出し）
+- ポイント1: 1200-1500文字（具体例・過去データ・専門家見解を豊富に）
+- ポイント2: 1200-1500文字（同上）
+- ポイント3: 1200-1500文字（必要に応じて）
+- 今後の展開: 900-1200文字（短期・中長期予測）
+- まとめ: 300文字
+- CTA: 600文字（いいね・チャンネル登録）
+
+⚠️ 各ポイントは必ず1200文字以上書いてください。
+具体例が少ない場合は、過去事例、市場への影響、他国との比較などで補ってください。
+
 【出力形式】
-以下の形式で厳密に出力してください:
-
 ## タイトル
-[動画のタイトル（15-35文字、投資家向けキャッチー）]
+[15-35文字の投資家向けタイトル]
 
 ## 台本
-【重要】台本にはセクション名や時間表記を含めないこと。
-純粋なナレーション原稿のみを出力してください。
-
-以下の構成で台本を作成（セクション名は書かない）:
-
-⚠️ **超重要**: 18分の動画を作るため、各セクションを十分に長く書いてください
-
-1. オープニング（約40秒分 = 200文字）
-   - 結論先出し
-   - 今日の価値を明示
-   - 自然な導入で始める
-
-2-4. ポイント1-3（各240-300秒 = 1200-1500文字）
-   ⚠️ 各ポイント必ず1200文字以上書く
-   - 具体的な数字・企業名・事例を豊富に
-   - 過去データとの比較、専門家の見解
-   - 背景・要因を深掘り、市場への影響
-   - 段落で区切る（改行2つ）
-
-5. 今後の展開（180-240秒 = 900-1200文字）
-   短期・中期・長期の予測、投資家の行動
-
-6. まとめ（60秒 = 300文字）
-   ポイント再確認、視聴者へのメッセージ
-
-7. CTA（120秒 = 600文字）
-   いいね・登録のお願い、締め「良い投資を！」
-
-⚠️ **文字数チェック**:
-- ポイント1-3: 各1200文字以上（合計3600文字以上）
-- その他のセクション: 合計約1800文字
-- 総合計: 5400文字前後を必ず達成してください
+[純粋なナレーション原稿のみ。セクション名は書かない。]
 
 ## キーワード
-[重要なキーワードをカンマ区切りで5-10個]
+[カンマ区切りで5-10個]
 
-【重要】
-- セクション名・時間表記は書かない
-- 純粋なナレーション原稿のみ
-- 段落は改行2つで区切る
-
-⚠️⚠️⚠️ **最重要確認** ⚠️⚠️⚠️
-各ポイント1200文字以上、台本全体5400文字前後を必ず達成。
-不足なら具体例・過去事例・専門家見解を追加。
+⚠️ 最重要: 台本は{target_chars}文字以上必須。各ポイント1200文字以上書くこと。
 """
 
         return prompt

@@ -1092,13 +1092,13 @@ interest rate policy
 
     def select_article_by_trending_score(self, articles: List[NewsArticle]) -> NewsArticle:
         """
-        話題性スコアで記事を選択
+        話題性スコアで記事を選択（上位30%から注目度加重ランダム選択）
 
         Args:
             articles: 記事リスト
 
         Returns:
-            最も話題性の高い記事
+            選択された記事
         """
         if not articles:
             return None
@@ -1118,11 +1118,24 @@ interest rate policy
         # スコアでソート（降順）
         scored_articles.sort(key=lambda x: x[1], reverse=True)
 
-        best_article = scored_articles[0][0]
-        best_score = scored_articles[0][1]
-        logger.info(f"Selected article with highest score ({best_score:.1f}/10): {best_article.title}")
+        # 上位30%を選択（最低でも1記事、最大でも全記事）
+        top_30_percent_count = max(1, int(len(scored_articles) * 0.3))
+        top_articles = scored_articles[:top_30_percent_count]
 
-        return best_article
+        logger.info(f"Selected top {top_30_percent_count} articles (top 30%) for weighted random selection:")
+        for article, score in top_articles:
+            logger.info(f"  - {score:.1f}/10 - {article.title[:60]}...")
+
+        # 注目度（スコア）を重みとして加重ランダム選択
+        articles_list = [article for article, _ in top_articles]
+        weights = [score for _, score in top_articles]
+
+        selected_article = random.choices(articles_list, weights=weights, k=1)[0]
+        selected_score = next(score for article, score in top_articles if article == selected_article)
+
+        logger.info(f"Randomly selected article (weighted by score {selected_score:.1f}/10): {selected_article.title}")
+
+        return selected_article
 
     def get_related_context_openai(self, main_article: NewsArticle) -> str:
         """

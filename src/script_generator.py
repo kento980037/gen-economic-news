@@ -213,7 +213,7 @@ class ScriptGenerator:
 
         # OpenAI APIで添削（重複削除、流れ改善）
         logger.info("Editing script to remove redundancy and improve flow...")
-        edited_script = self._edit_script(full_script, target_chars)
+        edited_script = self._edit_script(full_script, target_chars, outline)
 
         edited_length = len(edited_script)
         logger.info(f"Edited script length: {edited_length} chars (removed {original_length - edited_length} chars)")
@@ -505,19 +505,21 @@ class ScriptGenerator:
 
 【セクション】{section_name}
 
-【目標文字数】{target_chars}文字（必須）
-
-【指示】
+【このセクションの役割】
 {instruction}
 
-【重要要件】
-- 必ず{target_chars}文字以上書いてください
-- 具体的な企業名、数字、日付を使用
-- 専門用語は直後に説明を入れる
-- 自然な話し言葉で、「です・ます」調
-- セクション名や見出しは書かず、純粋なナレーション原稿のみ
+【執筆方針】
+- **簡潔に核心だけ**: 回りくどい説明は避け、重要なポイントに絞る
+- **具体性重視**: 企業名、数字、日付を正確に
+- **専門用語**: 括弧で短く補足（例: GDP（国内総生産））
+- **話し言葉**: 自然な「です・ます」調
+- **目標文字数**: {target_chars}文字程度（質を優先）
 
-このセクションの内容のみを出力してください（他のセクションは含めない）。
+【重要な禁止事項】
+このセクションに書くのは上記の役割に関することだけです。
+他のポイントで扱う内容は一切書かないでください。
+
+純粋なナレーション原稿のみを出力してください（セクション名や見出しは不要）。
 """
 
         try:
@@ -701,18 +703,32 @@ class ScriptGenerator:
             logger.error(f"Error generating title: {e}")
             return news_article.get("title", "経済ニュース解説")[:35]
 
-    def _edit_script(self, script: str, target_chars: int) -> str:
+    def _edit_script(self, script: str, target_chars: int, outline: Dict) -> str:
         """
         台本を添削（重複削除、流れ改善、冗長性削除）
 
         Args:
             script: 添削前の台本
             target_chars: 目標文字数
+            outline: 構成情報（各ポイントで扱う内容）
 
         Returns:
             添削後の台本
         """
         prompt = f"""以下の台本を添削してください。各セクションを個別に生成したため、重複や冗長性が多く含まれています。
+
+【台本の構成】（各ポイントで扱うべき内容）
+ポイント1【何が起きたか】: {outline['point1_summary']}
+扱う内容:
+{outline['point1_details']}
+
+ポイント2【なぜ起きたか】: {outline['point2_summary']}
+扱う内容:
+{outline['point2_details']}
+
+ポイント3【何を意味するか】: {outline['point3_summary']}
+扱う内容:
+{outline['point3_details']}
 
 【現在の台本】（{len(script)}文字）
 {script}
@@ -758,6 +774,23 @@ class ScriptGenerator:
 - 具体的な数字、企業名、日付（初出のみ）
 - 重要な事実と分析
 - 構成（オープニング→本文→まとめ→CTA）
+
+【構成に基づく重複削除】（最重要）
+上記の構成を見て、各ポイントの役割を理解してください：
+- **ポイント1（WHAT）**: {outline['point1_summary']}に集中
+- **ポイント2（WHY）**: {outline['point2_summary']}に集中
+- **ポイント3（SO WHAT）**: {outline['point3_summary']}に集中
+
+**重複削除のルール**:
+1. ポイント1で扱った内容（事実・数字）をポイント2・3で繰り返さない
+2. ポイント2で扱った内容（原因・背景）をポイント3で繰り返さない
+3. 同じ数字や事実は、構成で指定されたポイントでのみ詳しく説明
+4. 他のポイントで言及する場合は「前述の通り」「先ほどの」などで簡潔に
+
+**例**:
+- 「Infineon 1.6%, SAP 3.2%下落」はポイント1でのみ詳しく
+- ポイント3では「これらの企業」「先述の下落」と簡潔に
+- 同じ数字を4回も繰り返さない
 
 【目標】
 - 最終的な文字数: 4500-5000文字程度（質を優先、長さは二の次）

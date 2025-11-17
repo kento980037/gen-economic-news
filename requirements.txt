@@ -14,6 +14,9 @@ imageio-ffmpeg>=0.4.9
 decorator>=4.4.2
 proglog>=0.1.10
 
+# Audio processing
+pydub>=0.25.1  # For merging dialogue audio segments
+
 # Web scraping and RSS
 feedparser>=6.0.10
 beautifulsoup4>=4.12.0

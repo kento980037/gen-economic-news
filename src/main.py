@@ -263,9 +263,20 @@ class VideoGenerationPipeline:
         paths = self.context.get_output_paths()
         audio_dir = Path(paths["audio"]).parent
 
-        return self.voice_generator.generate_voice_with_auto_split(
-            script_data["script"], str(audio_dir), "voice"
-        )
+        # スクリプトのスタイルを確認
+        script_style = self.config.get("script", {}).get("style", "narration")
+
+        # 会話形式（dialogue）の場合は2人の声で生成
+        if script_style == "dialogue":
+            logger.info("Generating dialogue voice with two speakers")
+            return self.voice_generator.generate_voice_dialogue(
+                script_data["script"], str(audio_dir), "voice"
+            )
+        else:
+            # 単独ナレーション形式
+            return self.voice_generator.generate_voice_with_auto_split(
+                script_data["script"], str(audio_dir), "voice"
+            )
 
     def _generate_video(self, script_data, audio_files):
         """動画を生成"""

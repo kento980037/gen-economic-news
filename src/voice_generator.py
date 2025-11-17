@@ -44,7 +44,14 @@ class VoiceGenerator:
         self.voice = openai_config.get("voice", "alloy")
         self.speed = openai_config.get("speed", 1.0)
         self.format = openai_config.get("format", "mp3")
+
+        # 会話形式用の2人の声を設定
+        dialogue_voices_config = openai_config.get("dialogue_voices", {})
+        self.dialogue_voice_a = dialogue_voices_config.get("speaker_a", "shimmer")
+        self.dialogue_voice_b = dialogue_voices_config.get("speaker_b", "nova")
+
         logger.info(f"Initialized OpenAI TTS: model={self.model}, voice={self.voice}")
+        logger.info(f"Dialogue voices: A={self.dialogue_voice_a}, B={self.dialogue_voice_b}")
 
     def _init_gemini(self):
         """Gemini TTSの初期化"""
@@ -69,7 +76,14 @@ class VoiceGenerator:
         self.voice = gemini_config.get("voice", "Kore")
         self.format = gemini_config.get("format", "wav")
         self.style_prompt = gemini_config.get("style_prompt", "")
+
+        # 会話形式用の2人の声を設定
+        dialogue_voices_config = gemini_config.get("dialogue_voices", {})
+        self.dialogue_voice_a = dialogue_voices_config.get("speaker_a", "Fenrir")
+        self.dialogue_voice_b = dialogue_voices_config.get("speaker_b", "Aoede")
+
         logger.info(f"Initialized Gemini TTS: model={self.model}, voice={self.voice}")
+        logger.info(f"Dialogue voices: A={self.dialogue_voice_a}, B={self.dialogue_voice_b}")
 
     def generate_voice(
         self, text: str, output_path: str, voice: Optional[str] = None, retry_count: int = 0
@@ -302,6 +316,162 @@ class VoiceGenerator:
         else:
             # 複数セグメントの場合は番号付きファイルを生成
             return self.generate_voice_segments(segments, output_dir, filename)
+
+    def generate_voice_dialogue(
+        self, script_text: str, output_dir: str, filename: str = "voice"
+    ) -> list[str]:
+        """
+        会話形式の台本から2人の声で音声を生成
+
+        Args:
+            script_text: 会話形式の台本テキスト（A: とB: で発言者を明記）
+            output_dir: 出力ディレクトリ
+            filename: ファイル名（拡張子なし）
+
+        Returns:
+            生成された音声ファイルパスのリスト
+        """
+        logger.info("Generating dialogue voice with two speakers")
+
+        # 台本を解析してA:とB:の発言を抽出
+        dialogue_segments = self._parse_dialogue_script(script_text)
+
+        if not dialogue_segments:
+            logger.warning("No dialogue segments found, falling back to single voice generation")
+            return self.generate_voice_with_auto_split(script_text, output_dir, filename)
+
+        # 出力ディレクトリを作成
+        output_dir_path = Path(output_dir)
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+
+        # 各発言を生成
+        audio_files = []
+        for i, segment in enumerate(dialogue_segments):
+            speaker = segment["speaker"]
+            text = segment["text"]
+
+            # 発言者に応じて声を選択
+            if speaker == "A":
+                voice = self.dialogue_voice_a
+            elif speaker == "B":
+                voice = self.dialogue_voice_b
+            else:
+                voice = None  # デフォルトの声を使用
+
+            # 音声ファイルのパス
+            segment_path = output_dir_path / f"{filename}_seg{i:03d}.{self.format}"
+
+            try:
+                # 音声生成
+                logger.info(f"Generating segment {i}: Speaker {speaker} ({voice})")
+                self.generate_voice(text, str(segment_path), voice=voice)
+                audio_files.append(str(segment_path))
+            except Exception as e:
+                logger.error(f"Error generating dialogue segment {i}: {e}")
+                # エラーがあっても続行
+
+        if not audio_files:
+            raise RuntimeError("Failed to generate any dialogue audio segments")
+
+        # 音声ファイルを結合
+        merged_path = output_dir_path / f"{filename}.{self.format}"
+        logger.info(f"Merging {len(audio_files)} dialogue segments into {merged_path}")
+        self._merge_audio_files(audio_files, str(merged_path))
+
+        # 一時ファイルを削除
+        for audio_file in audio_files:
+            try:
+                Path(audio_file).unlink()
+            except Exception as e:
+                logger.warning(f"Could not delete temporary file {audio_file}: {e}")
+
+        logger.info(f"Dialogue voice generation complete: {merged_path}")
+        return [str(merged_path)]
+
+    def _parse_dialogue_script(self, script_text: str) -> List[Dict]:
+        """
+        会話形式の台本を解析してA:とB:の発言を抽出
+
+        Args:
+            script_text: 会話形式の台本テキスト
+
+        Returns:
+            発言セグメントのリスト [{"speaker": "A", "text": "..."}, ...]
+        """
+        import re
+
+        segments = []
+        lines = script_text.split("\n")
+
+        current_speaker = None
+        current_text = []
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # 発言者の識別（A: またはB: で始まる行）
+            speaker_match = re.match(r'^([AB])[:：]\s*(.*)$', line)
+
+            if speaker_match:
+                # 前の発言を保存
+                if current_speaker and current_text:
+                    segments.append({
+                        "speaker": current_speaker,
+                        "text": " ".join(current_text).strip()
+                    })
+
+                # 新しい発言を開始
+                current_speaker = speaker_match.group(1)
+                current_text = [speaker_match.group(2)]
+            else:
+                # 継続行（発言者の指定がない行は前の発言者の続き）
+                if current_speaker:
+                    current_text.append(line)
+
+        # 最後の発言を保存
+        if current_speaker and current_text:
+            segments.append({
+                "speaker": current_speaker,
+                "text": " ".join(current_text).strip()
+            })
+
+        logger.info(f"Parsed dialogue script: {len(segments)} segments (A: {sum(1 for s in segments if s['speaker'] == 'A')}, B: {sum(1 for s in segments if s['speaker'] == 'B')})")
+
+        return segments
+
+    def _merge_audio_files(self, audio_files: List[str], output_path: str):
+        """
+        複数の音声ファイルを1つに結合
+
+        Args:
+            audio_files: 結合する音声ファイルのリスト
+            output_path: 出力ファイルパス
+        """
+        try:
+            # pydubを使用して音声を結合
+            from pydub import AudioSegment
+
+            # 最初の音声を読み込み
+            combined = AudioSegment.from_file(audio_files[0])
+
+            # 残りの音声を順次追加
+            for audio_file in audio_files[1:]:
+                audio = AudioSegment.from_file(audio_file)
+                combined += audio
+
+            # 結合した音声を保存
+            combined.export(output_path, format=self.format)
+
+            logger.info(f"Merged {len(audio_files)} audio files into {output_path}")
+
+        except ImportError:
+            logger.error("pydub is required for merging audio files. Install it with: pip install pydub")
+            raise
+        except Exception as e:
+            logger.error(f"Error merging audio files: {e}")
+            raise
 
     def transcribe_audio_with_timestamps(
         self, audio_file: str, script_text: Optional[str] = None, subtitle_config: Optional[Dict] = None

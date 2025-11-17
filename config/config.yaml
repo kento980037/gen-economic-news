@@ -405,6 +405,12 @@ voice:
     model: "tts-1-hd"  # tts-1 or tts-1-hd
     voice: "nova"  # nova（明るく聞き取りやすい女性声・金融向け推奨）
                    # その他: shimmer（優しい女性声）, alloy（中性的）
+
+    # 会話形式（dialogue）用の2人の声設定
+    dialogue_voices:
+      speaker_a: "shimmer"  # ボケ役（ゆるい感じ）: 優しい女性声
+      speaker_b: "nova"     # ツッコミ役（知的）: 明るく聞き取りやすい女性声
+
     speed: 1.05  # 1.05倍速（ポッドキャストはやや速めがテンポ良い）
     format: "mp3"  # mp3, opus, aac, flac
 
@@ -413,6 +419,12 @@ voice:
     model: "gemini-2.5-flash-preview-tts"  # gemini-2.5-flash-preview-tts or gemini-2.5-pro-preview-tts
     voice: "Aoede"  # 金融向け女性声推奨: "Aoede"（明瞭で知的な女性声）
                     # その他: "Kore"（中性的）, "Fenrir"（落ち着いた女性声）
+
+    # 会話形式（dialogue）用の2人の声設定
+    dialogue_voices:
+      speaker_a: "Fenrir"  # ボケ役（ゆるい感じ）: 落ち着いた女性声
+      speaker_b: "Aoede"   # ツッコミ役（知的）: 明瞭で知的な女性声
+
     format: "wav"  # PCM audio (24kHz, mono, 16-bit)
 
     # 音声スタイルのカスタマイズ用プロンプト（金融ポッドキャスト向け）

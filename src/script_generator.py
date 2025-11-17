@@ -42,6 +42,15 @@ class ScriptGenerator:
         else:
             self.system_prompt = config.get("system_prompt", "")
 
+        # マルチターン会話設定
+        multiturn_config = config.get("multiturn_dialogue", {})
+        self.multiturn_enabled = multiturn_config.get("enabled", False)
+        self.turns_per_section = multiturn_config.get("turns_per_section", 4)
+
+        # キャラクター別のsystem prompt
+        self.system_prompt_speaker_a = config.get("system_prompt_speaker_a", "")
+        self.system_prompt_speaker_b = config.get("system_prompt_speaker_b", "")
+
     def generate_script_by_sections(
         self,
         news_article: Dict,
@@ -259,6 +268,13 @@ class ScriptGenerator:
         """
         logger.info(f"Generating chill podcast script for: {news_article.get('title', 'Unknown')}")
 
+        # マルチターン会話生成が有効かつdialogueスタイルの場合
+        if self.multiturn_enabled and self.style == "dialogue":
+            logger.info("Using multi-turn dialogue generation")
+            return self._generate_dialogue_multiturn(
+                news_article, target_duration, additional_context
+            )
+
         # 文字数を時間から計算（日本語: 1秒あたり約5文字）
         target_chars = target_duration * 5  # 720秒 × 5 = 3600文字
         logger.info(f"Target duration: {target_duration} seconds, Target chars: {target_chars} characters")
@@ -352,6 +368,220 @@ B: まあ、簡単に言うと〜ってことですね
         except Exception as e:
             logger.error(f"Error generating chill script: {e}")
             raise
+
+    def _generate_dialogue_multiturn(
+        self,
+        news_article: Dict,
+        target_duration: int = 720,
+        additional_context: Optional[str] = None,
+    ) -> Dict:
+        """
+        マルチターン会話生成（AとBの発言を交互に生成）
+
+        Args:
+            news_article: ニュース記事の辞書
+            target_duration: 目標動画時間（秒）
+            additional_context: 追加のコンテキスト情報
+
+        Returns:
+            生成された台本の辞書
+        """
+        logger.info("Starting multi-turn dialogue generation")
+
+        # 記事情報の準備
+        article_content = news_article.get('content', '')
+        if not article_content or len(article_content.strip()) < 50:
+            article_content = news_article.get('summary', '')
+
+        article_info = f"""【メイン記事】
+タイトル: {news_article.get('title', '')}
+本文: {article_content}
+ソース: {news_article.get('source', '')}
+公開日時: {news_article.get('published_at', '')}
+"""
+        if additional_context:
+            article_info += f"\n【関連記事】\n{additional_context}\n"
+
+        # 会話の全体構成を定義
+        sections = [
+            {
+                "name": "オープニング",
+                "turns": 2,  # A → B
+                "context": "今日のポッドキャストを始める。お酒を飲みながらのリラックスした雰囲気で、今日のニュースを簡単に紹介。"
+            },
+            {
+                "name": "ニュース紹介",
+                "turns": 3,  # A → B → A
+                "context": "今日のニュースの概要を紹介。Aがざっくり、Bが正確な情報を補足。"
+            },
+            {
+                "name": "メイン解説",
+                "turns": self.turns_per_section,  # 設定値（デフォルト4）
+                "context": "ニュースの詳細を深掘り。Aのボケ、Bのツッコミで掘り下げていく。数字や背景を詳しく。"
+            },
+            {
+                "name": "関連情報・過去事例",
+                "turns": 3,
+                "context": "関連する情報や過去の似た事例について話す。Aが興味を示し、Bが説明。"
+            },
+            {
+                "name": "感想と意味",
+                "turns": 3,
+                "context": "このニュースが何を意味するか、投資家にとってどうか。Aの感性、Bの論理で。"
+            },
+            {
+                "name": "まとめ",
+                "turns": 2,  # B → A
+                "context": "今日のポイントを2-3つに整理。Bがまとめ、Aが感想。"
+            },
+            {
+                "name": "エンディング",
+                "turns": 2,  # A → B
+                "context": "いいね・チャンネル登録のお願い。「良い投資を！」で締める。"
+            }
+        ]
+
+        # 会話履歴を保持
+        conversation_history = []
+        full_dialogue = []
+
+        # 各セクションで会話を生成
+        for section in sections:
+            logger.info(f"Generating section: {section['name']} ({section['turns']} turns)")
+
+            section_context = f"""【セクション】{section['name']}
+【このセクションの目的】{section['context']}
+【記事情報】
+{article_info}
+"""
+
+            # 各ターンで発言を生成
+            for turn_idx in range(section['turns']):
+                # 話者を決定（奇数ターンはA、偶数ターンはB）
+                speaker = "A" if turn_idx % 2 == 0 else "B"
+
+                # 発言を生成
+                utterance = self._generate_speaker_turn(
+                    speaker=speaker,
+                    section_context=section_context,
+                    conversation_history=conversation_history,
+                    is_first_turn=(turn_idx == 0)
+                )
+
+                # 会話履歴に追加
+                conversation_history.append({
+                    "speaker": speaker,
+                    "text": utterance
+                })
+
+                # 台本に追加
+                full_dialogue.append(f"{speaker}: {utterance}")
+
+                logger.info(f"  Turn {turn_idx + 1}/{section['turns']}: {speaker} ({len(utterance)} chars)")
+
+        # 台本を結合
+        script_text = "\n".join(full_dialogue)
+        script_length = len(script_text)
+
+        logger.info(f"✓ Multi-turn dialogue generated. Total length: {script_length} chars")
+
+        # タイトルを生成
+        title = self._generate_title(article_info, news_article)
+
+        # キーワードを生成
+        keywords = self._generate_keywords(article_info, script_text)
+
+        return {
+            "title": title,
+            "script": script_text,
+            "keywords": keywords,
+            "estimated_duration": script_length // 5,
+            "generated_at": datetime.now().isoformat(),
+        }
+
+    def _generate_speaker_turn(
+        self,
+        speaker: str,
+        section_context: str,
+        conversation_history: List[Dict],
+        is_first_turn: bool = False
+    ) -> str:
+        """
+        1ターンの発言を生成（AまたはB）
+
+        Args:
+            speaker: 話者（"A" または "B"）
+            section_context: セクションのコンテキスト
+            conversation_history: これまでの会話履歴
+            is_first_turn: セクションの最初のターンかどうか
+
+        Returns:
+            生成された発言テキスト
+        """
+        # キャラクターに応じたsystem promptを選択
+        if speaker == "A":
+            system_prompt = self.system_prompt_speaker_a
+        else:
+            system_prompt = self.system_prompt_speaker_b
+
+        # 会話履歴を整形
+        history_text = ""
+        if conversation_history:
+            recent_history = conversation_history[-6:]  # 直近6ターンのみ
+            history_text = "\n".join([
+                f"{h['speaker']}: {h['text']}" for h in recent_history
+            ])
+
+        # プロンプトを構築
+        if is_first_turn:
+            # セクションの最初のターン
+            user_prompt = f"""{section_context}
+
+このセクションを始めてください。あなた（{speaker}）が最初に話します。
+
+【重要】
+- 短い発言（1-3文）で
+- 自然な会話のように
+- キャラクターらしく
+"""
+        else:
+            # 続きのターン
+            user_prompt = f"""{section_context}
+
+【これまでの会話】
+{history_text}
+
+上記の会話を受けて、あなた（{speaker}）の発言を続けてください。
+
+【重要】
+- 短い発言（1-3文）で
+- 相手の発言を受けて自然に
+- キャラクターらしく
+"""
+
+        try:
+            # OpenAI APIを呼び出し
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=300,  # 短い発言なので少なめ
+                temperature=0.8,  # 自然な会話のため高め
+            )
+
+            utterance = response.choices[0].message.content.strip()
+
+            # 「A:」や「B:」のプレフィックスを削除（もし含まれている場合）
+            import re
+            utterance = re.sub(r'^[AB][:：]\s*', '', utterance)
+
+            return utterance
+
+        except Exception as e:
+            logger.error(f"Error generating turn for speaker {speaker}: {e}")
+            return f"[発言生成エラー]"
 
     def generate_script(
         self,

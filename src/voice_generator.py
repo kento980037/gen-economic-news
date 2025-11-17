@@ -362,16 +362,35 @@ class VoiceGenerator:
             segment_path = output_dir_path / f"{filename}_seg{i:03d}.{self.format}"
 
             try:
+                # レート制限対策：2個目以降は少し待機
+                if i > 0:
+                    import time
+                    time.sleep(0.5)  # 0.5秒待機
+
                 # 音声生成
-                logger.info(f"Generating segment {i}: Speaker {speaker} ({voice})")
+                logger.info(f"Generating segment {i}/{len(dialogue_segments)}: Speaker {speaker} ({voice}) - {len(text)} chars")
                 self.generate_voice(text, str(segment_path), voice=voice)
                 audio_files.append(str(segment_path))
+                logger.info(f"✓ Segment {i} generated successfully")
             except Exception as e:
-                logger.error(f"Error generating dialogue segment {i}: {e}")
-                # エラーがあっても続行
+                logger.error(f"✗ Error generating dialogue segment {i}: {e}")
+                # 最初の数個だけ失敗した場合は続行、それ以外は中断
+                if i < 3:
+                    # 最初の3個以内のエラーは続行
+                    continue
+                else:
+                    # 3個以降でエラーが発生したら、それまでのを使う
+                    logger.warning(f"Too many errors, using {len(audio_files)} segments generated so far")
+                    break
 
         if not audio_files:
             raise RuntimeError("Failed to generate any dialogue audio segments")
+
+        if len(audio_files) < len(dialogue_segments) // 2:
+            logger.warning(
+                f"Only {len(audio_files)}/{len(dialogue_segments)} segments generated successfully. "
+                f"This may result in a short video."
+            )
 
         # 音声ファイルを結合
         merged_path = output_dir_path / f"{filename}.{self.format}"

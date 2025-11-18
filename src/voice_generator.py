@@ -563,6 +563,100 @@ class VoiceGenerator:
             logger.error(f"Error merging audio files with timing: {e}")
             raise
 
+    def _split_long_subtitles(self, segments: List[Dict], max_chars: int = 40) -> List[Dict]:
+        """
+        長すぎる字幕を適切な位置で分割
+
+        Args:
+            segments: 字幕セグメントのリスト
+            max_chars: 1行の最大文字数
+
+        Returns:
+            分割された字幕セグメントのリスト
+        """
+        split_segments = []
+
+        for segment in segments:
+            text = segment["text"]
+            start_time = segment["start"]
+            end_time = segment["end"]
+            duration = end_time - start_time
+
+            # 最大文字数以下ならそのまま
+            if len(text) <= max_chars:
+                split_segments.append(segment)
+                continue
+
+            # 句読点で分割
+            import re
+            # 句読点（。、）で分割し、句読点も含める
+            parts = re.split(r'([。、])', text)
+
+            # 句読点を前の部分に結合
+            merged_parts = []
+            i = 0
+            while i < len(parts):
+                if parts[i]:  # 空文字列をスキップ
+                    part = parts[i]
+                    # 次が句読点なら結合
+                    if i + 1 < len(parts) and parts[i + 1] in ['。', '、']:
+                        part += parts[i + 1]
+                        i += 2
+                    else:
+                        i += 1
+                    if part.strip():
+                        merged_parts.append(part.strip())
+                else:
+                    i += 1
+
+            # 分割できない場合（句読点がない）は、スペースで分割を試みる
+            if not merged_parts:
+                # max_charsごとに強制分割
+                merged_parts = [text[i:i+max_chars] for i in range(0, len(text), max_chars)]
+
+            # さらに長い部分をmax_charsで再分割
+            final_parts = []
+            for part in merged_parts:
+                if len(part) <= max_chars:
+                    final_parts.append(part)
+                else:
+                    # スペースで分割を試みる
+                    words = part.split()
+                    current_line = ""
+                    for word in words:
+                        if len(current_line) + len(word) + 1 <= max_chars:
+                            current_line += (word + " ")
+                        else:
+                            if current_line:
+                                final_parts.append(current_line.strip())
+                            current_line = word + " "
+                    if current_line:
+                        final_parts.append(current_line.strip())
+
+            # 各パートに時間を割り当て
+            if not final_parts:
+                final_parts = [text]
+
+            total_chars = sum(len(p) for p in final_parts)
+            current_time = start_time
+
+            for part in final_parts:
+                # 文字数比率で時間を計算
+                char_ratio = len(part) / total_chars if total_chars > 0 else 1.0 / len(final_parts)
+                part_duration = duration * char_ratio
+
+                split_segments.append({
+                    "start": current_time,
+                    "end": current_time + part_duration,
+                    "text": part,
+                    "speaker": segment.get("speaker")  # 発言者情報を保持
+                })
+
+                current_time += part_duration
+
+        logger.info(f"Split {len(segments)} segments into {len(split_segments)} subtitle lines")
+        return split_segments
+
     def transcribe_audio_with_timestamps(
         self, audio_file: str, script_text: Optional[str] = None, subtitle_config: Optional[Dict] = None
     ) -> list[dict]:
@@ -597,9 +691,13 @@ class VoiceGenerator:
                 with open(timing_json_path, 'r', encoding='utf-8') as f:
                     segment_timings = json.load(f)
 
-                # タイミング情報をそのまま字幕セグメントとして使用
                 logger.info(f"Loaded {len(segment_timings)} dialogue segments from timing file")
-                return segment_timings
+
+                # 長すぎる字幕を分割
+                split_segments = self._split_long_subtitles(segment_timings, max_chars=40)
+                logger.info(f"Split into {len(split_segments)} subtitle segments (max 40 chars per line)")
+
+                return split_segments
             except Exception as e:
                 logger.warning(f"Failed to load timing info, falling back to Whisper: {e}")
 

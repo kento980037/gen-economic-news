@@ -392,10 +392,16 @@ class VoiceGenerator:
                 f"This may result in a short video."
             )
 
-        # 音声ファイルを結合
+        # 音声ファイルを結合し、タイミング情報を記録
         merged_path = output_dir_path / f"{filename}.{self.format}"
         logger.info(f"Merging {len(audio_files)} dialogue segments into {merged_path}")
-        self._merge_audio_files(audio_files, str(merged_path))
+        segment_timings = self._merge_audio_files_with_timing(audio_files, str(merged_path), dialogue_segments)
+
+        # タイミング情報をJSONファイルに保存（字幕生成で使用）
+        timing_json_path = output_dir_path / f"{filename}_timings.json"
+        with open(timing_json_path, 'w', encoding='utf-8') as f:
+            json.dump(segment_timings, f, ensure_ascii=False, indent=2)
+        logger.info(f"Saved segment timing information to {timing_json_path}")
 
         # 一時ファイルを削除
         for audio_file in audio_files:
@@ -492,6 +498,71 @@ class VoiceGenerator:
             logger.error(f"Error merging audio files: {e}")
             raise
 
+    def _merge_audio_files_with_timing(
+        self, audio_files: List[str], output_path: str, dialogue_segments: List[Dict]
+    ) -> List[Dict]:
+        """
+        複数の音声ファイルを1つに結合し、各セグメントのタイミング情報を記録
+
+        Args:
+            audio_files: 結合する音声ファイルのリスト
+            output_path: 出力ファイルパス
+            dialogue_segments: 台本から解析した発言セグメント情報
+
+        Returns:
+            各セグメントのタイミング情報のリスト
+            [{"speaker": "A", "text": "...", "start": 0.0, "end": 2.5}, ...]
+        """
+        try:
+            from pydub import AudioSegment
+
+            segment_timings = []
+            current_time = 0.0
+
+            # 最初の音声を読み込み
+            combined = AudioSegment.from_file(audio_files[0])
+            duration = len(combined) / 1000.0  # ミリ秒から秒に変換
+
+            # 最初のセグメントのタイミング情報を記録
+            if len(dialogue_segments) > 0:
+                segment_timings.append({
+                    "speaker": dialogue_segments[0]["speaker"],
+                    "text": dialogue_segments[0]["text"],
+                    "start": current_time,
+                    "end": current_time + duration
+                })
+                current_time += duration
+
+            # 残りの音声を順次追加
+            for i, audio_file in enumerate(audio_files[1:], start=1):
+                audio = AudioSegment.from_file(audio_file)
+                combined += audio
+
+                duration = len(audio) / 1000.0  # ミリ秒から秒に変換
+
+                # タイミング情報を記録
+                if i < len(dialogue_segments):
+                    segment_timings.append({
+                        "speaker": dialogue_segments[i]["speaker"],
+                        "text": dialogue_segments[i]["text"],
+                        "start": current_time,
+                        "end": current_time + duration
+                    })
+                    current_time += duration
+
+            # 結合した音声を保存
+            combined.export(output_path, format=self.format)
+
+            logger.info(f"Merged {len(audio_files)} audio files with timing info: {len(segment_timings)} segments")
+            return segment_timings
+
+        except ImportError:
+            logger.error("pydub is required for merging audio files. Install it with: pip install pydub")
+            raise
+        except Exception as e:
+            logger.error(f"Error merging audio files with timing: {e}")
+            raise
+
     def transcribe_audio_with_timestamps(
         self, audio_file: str, script_text: Optional[str] = None, subtitle_config: Optional[Dict] = None
     ) -> list[dict]:
@@ -513,6 +584,24 @@ class VoiceGenerator:
         # 字幕設定のデフォルト値
         if subtitle_config is None:
             subtitle_config = {}
+
+        # 会話形式の音声の場合、タイミング情報ファイルが存在するかチェック
+        audio_path = Path(audio_file)
+        timing_json_path = audio_path.parent / f"{audio_path.stem}_timings.json"
+
+        if timing_json_path.exists():
+            logger.info(f"Found dialogue timing info: {timing_json_path}")
+            logger.info("Using speaker-based segmentation for dialogue subtitles")
+
+            try:
+                with open(timing_json_path, 'r', encoding='utf-8') as f:
+                    segment_timings = json.load(f)
+
+                # タイミング情報をそのまま字幕セグメントとして使用
+                logger.info(f"Loaded {len(segment_timings)} dialogue segments from timing file")
+                return segment_timings
+            except Exception as e:
+                logger.warning(f"Failed to load timing info, falling back to Whisper: {e}")
 
         try:
             # OpenAI Whisperで文字起こし（プロバイダーに関係なくWhisperを使用）

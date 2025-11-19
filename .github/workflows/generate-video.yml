@@ -4,10 +4,6 @@
 name: Generate Economic News Video
 
 on:
-  # スケジュール実行（毎日午前9時 JST = 午前0時 UTC）
-  schedule:
-    - cron: '0 0 * * *'  # 毎日午前0時 UTC
-
   # 手動実行を許可
   workflow_dispatch:
 
@@ -50,6 +46,7 @@ jobs:
 
       - name: Create .env file
         run: |
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" >> .env
           echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
           echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
           echo "NEWS_API_KEY=${{ secrets.NEWS_API_KEY }}" >> .env
@@ -82,6 +79,7 @@ jobs:
           fi
 
 # GitHub Secretsに以下を設定してください:
+# - ANTHROPIC_API_KEY (必須 - Claude API for script generation)
 # - OPENAI_API_KEY (OpenAI TTS使用時は必須、Whisper文字起こしで常に使用)
 # - GEMINI_API_KEY (Gemini TTS使用時は必須)
 # - NEWS_API_KEY (オプション)

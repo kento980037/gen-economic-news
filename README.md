@@ -139,6 +139,9 @@ python main.py
 # Dry run (no actual generation)
 python main.py --dry-run
 
+# Test mode (with sample data)
+python main.py --test
+
 # Specify custom config file
 python main.py --config ../config/config.yaml
 ```
@@ -215,18 +218,9 @@ Add:
 
 **2. Enable Workflow:**
 
-The workflow `.github/workflows/generate-video.yml` runs automatically.
+The workflow `.github/workflows/generate-video.yml` can be triggered manually or on push to main branch.
 
-**3. Customize Schedule:**
-
-Edit the schedule in `.github/workflows/generate-video.yml`:
-
-```yaml
-schedule:
-  - cron: '0 0 * * *'  # Daily at 00:00 UTC (09:00 JST)
-```
-
-**4. Manual Execution:**
+**3. Manual Execution:**
 
 You can also trigger manually:
 1. Go to the "Actions" tab in your repository
@@ -338,10 +332,6 @@ If you encounter font errors during video generation:
 # Edit the font path in video_generator.py
 font = ImageFont.truetype("/path/to/your/japanese/font.ttc", font_size)
 ```
-
-## License
-
-MIT License
 
 ## References
 

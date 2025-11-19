@@ -426,41 +426,52 @@ class VoiceGenerator:
         import re
 
         segments = []
-        lines = script_text.split("\n")
 
-        current_speaker = None
-        current_text = []
+        # 空行で区切ってブロックに分割
+        blocks = script_text.split("\n\n")
 
-        for line in lines:
-            line = line.strip()
-            if not line:
+        last_speaker = None  # 最後に使用した発言者を記録
+
+        for block in blocks:
+            block = block.strip()
+            if not block:
                 continue
 
-            # 発言者の識別（A: またはB: で始まる行）
-            speaker_match = re.match(r'^([AB])[:：]\s*(.*)$', line)
+            # ブロック内の行を処理
+            lines = block.split("\n")
+            block_text = []
+            speaker = None
 
-            if speaker_match:
-                # 前の発言を保存
-                if current_speaker and current_text:
-                    segments.append({
-                        "speaker": current_speaker,
-                        "text": " ".join(current_text).strip()
-                    })
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
 
-                # 新しい発言を開始
-                current_speaker = speaker_match.group(1)
-                current_text = [speaker_match.group(2)]
-            else:
-                # 継続行（発言者の指定がない行は前の発言者の続き）
-                if current_speaker:
-                    current_text.append(line)
+                # 発言者の識別（A: またはB: で始まる行）
+                speaker_match = re.match(r'^([AB])[:：]\s*(.*)$', line)
 
-        # 最後の発言を保存
-        if current_speaker and current_text:
-            segments.append({
-                "speaker": current_speaker,
-                "text": " ".join(current_text).strip()
-            })
+                if speaker_match:
+                    speaker = speaker_match.group(1)
+                    text = speaker_match.group(2)
+                    if text:
+                        block_text.append(text)
+                else:
+                    block_text.append(line)
+
+            # ブロックに発言者指定がない場合、AとBを交互に割り当て
+            if not speaker:
+                if last_speaker == "A":
+                    speaker = "B"
+                else:
+                    speaker = "A"
+
+            # セグメントを追加
+            if block_text:
+                segments.append({
+                    "speaker": speaker,
+                    "text": " ".join(block_text).strip()
+                })
+                last_speaker = speaker
 
         logger.info(f"Parsed dialogue script: {len(segments)} segments (A: {sum(1 for s in segments if s['speaker'] == 'A')}, B: {sum(1 for s in segments if s['speaker'] == 'B')})")
 
@@ -578,13 +589,22 @@ class VoiceGenerator:
 
         for segment in segments:
             text = segment["text"]
+
+            # 鉤括弧を削除（音声では読まれないため）
+            text = text.replace("「", "").replace("」", "")
+
             start_time = segment["start"]
             end_time = segment["end"]
             duration = end_time - start_time
 
-            # 最大文字数以下ならそのまま
+            # 最大文字数以下ならそのまま（鉤括弧削除済みのテキストを使用）
             if len(text) <= max_chars:
-                split_segments.append(segment)
+                split_segments.append({
+                    "start": start_time,
+                    "end": end_time,
+                    "text": text,
+                    "speaker": segment.get("speaker")
+                })
                 continue
 
             # 句読点で分割

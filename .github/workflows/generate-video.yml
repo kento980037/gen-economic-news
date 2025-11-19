@@ -22,7 +22,7 @@ on:
 jobs:
   generate-video:
     runs-on: ubuntu-latest
-    timeout-minutes: 45  # 最適化後でも余裕を持たせる
+    timeout-minutes: 120  # レート制限対策で時間がかかるため、120分（2時間）に設定
 
     steps:
       - name: Checkout code

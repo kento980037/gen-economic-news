@@ -498,6 +498,13 @@ voice:
   # "openai" = 安定性高い、"gemini" = 自然な発音
   provider: "gemini"  # Gemini TTS使用（自然な日本語発音）
 
+  # レート制限対策設定（OpenAI/Gemini共通）
+  rate_limit:
+    # リクエスト間のsleep時間（秒）
+    # Gemini TTS APIは60 RPM（リクエスト/分）の制限があります
+    # 推奨: 2-5秒（1分間に12-30リクエスト程度に抑える）
+    requests_interval: 3.0  # 3秒待機（1分間に20リクエスト程度）
+
   # OpenAI TTS設定
   openai:
     model: "tts-1-hd"  # tts-1 or tts-1-hd

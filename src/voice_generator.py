@@ -26,6 +26,11 @@ class VoiceGenerator:
         self.config = config
         self.provider = config.get("provider", "openai")
 
+        # レート制限設定を読み込み
+        rate_limit_config = config.get("rate_limit", {})
+        self.requests_interval = rate_limit_config.get("requests_interval", 3.0)
+        logger.info(f"Rate limit: {self.requests_interval} seconds between requests")
+
         # プロバイダー別の初期化
         if self.provider == "gemini":
             self._init_gemini()
@@ -221,6 +226,12 @@ class VoiceGenerator:
                 logger.warning(f"Skipping empty segment {i}")
                 continue
 
+            # レート制限対策：2個目以降は設定された時間待機
+            if i > 0:
+                import time
+                logger.info(f"Rate limiting: waiting {self.requests_interval} seconds before next request...")
+                time.sleep(self.requests_interval)
+
             output_path = output_dir_path / f"{prefix}_{i:03d}.{self.format}"
             try:
                 file_path = self.generate_voice(text, str(output_path))
@@ -362,10 +373,11 @@ class VoiceGenerator:
             segment_path = output_dir_path / f"{filename}_seg{i:03d}.{self.format}"
 
             try:
-                # レート制限対策：2個目以降は少し待機
+                # レート制限対策：2個目以降は設定された時間待機
                 if i > 0:
                     import time
-                    time.sleep(0.5)  # 0.5秒待機
+                    logger.info(f"Rate limiting: waiting {self.requests_interval} seconds before next request...")
+                    time.sleep(self.requests_interval)
 
                 # 音声生成
                 logger.info(f"Generating segment {i}/{len(dialogue_segments)}: Speaker {speaker} ({voice}) - {len(text)} chars")

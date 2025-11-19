@@ -8,7 +8,7 @@ An automated system that generates narrated video content from economic news usi
 - **AI-Powered Script Generation**: Creates natural Japanese narratives using Claude API
 - **High-Quality Voice Synthesis**: Supports both OpenAI TTS and Gemini TTS for realistic voice-overs
 - **Automated Video Production**: Generates videos with synchronized subtitles, thumbnails, and metadata
-- **Flexible Deployment**: Run locally, on Render.com cron jobs, or via GitHub Actions
+- **Flexible Deployment**: Run locally or via GitHub Actions
 - **Notifications**: Optional Slack integration for workflow updates
 
 ## Technology Stack
@@ -16,7 +16,7 @@ An automated system that generates narrated video content from economic news usi
 - **AI & APIs**: Claude (Anthropic), OpenAI TTS, Gemini TTS, NewsAPI
 - **Video Processing**: MoviePy, FFmpeg, Pillow
 - **Audio Processing**: pydub, OpenAI Whisper (for transcription)
-- **Deployment**: Render.com, GitHub Actions
+- **Deployment**: GitHub Actions
 - **Notifications**: Slack SDK
 
 ## System Architecture
@@ -43,7 +43,6 @@ gen-economic-news/
 │   ├── scripts/                 # Scripts & metadata
 │   └── logs/                    # Application logs
 ├── requirements.txt             # Python dependencies
-├── render.yaml                  # Render deployment config
 └── .github/workflows/           # GitHub Actions workflows
 ```
 
@@ -172,39 +171,9 @@ python metadata_generator.py
 python utils.py
 ```
 
-## Deployment Options
+## Deployment with GitHub Actions
 
-### Option 1: Render Cron Job (Recommended)
-
-1. Sign up at [Render](https://render.com)
-2. Create a new Cron Job
-3. Connect this repository
-4. `render.yaml` will be auto-detected
-5. Set environment variables:
-   - `ANTHROPIC_API_KEY`
-   - `OPENAI_API_KEY` or `GEMINI_API_KEY`
-   - `NEWS_API_KEY` (optional)
-   - `SLACK_WEBHOOK_URL` (optional)
-6. Deploy
-
-**Schedule Configuration:**
-
-Edit the `schedule` in `render.yaml`:
-
-```yaml
-schedule: "0 9 * * *"  # Daily at 9:00 AM
-# or
-schedule: "0 */6 * * *"  # Every 6 hours
-```
-
-**Important Notes:**
-- Render's free tier doesn't include persistent storage
-- For permanent video storage, integrate external storage (AWS S3, Google Cloud Storage)
-- Paid plans provide persistent disks
-
-### Option 2: GitHub Actions
-
-Alternatively, use GitHub Actions for scheduled execution.
+Use GitHub Actions for automated execution.
 
 **1. Configure GitHub Secrets:**
 
@@ -339,7 +308,6 @@ font = ImageFont.truetype("/path/to/your/japanese/font.ttc", font_size)
 - [OpenAI TTS Documentation](https://platform.openai.com/docs/guides/text-to-speech)
 - [Gemini API Documentation](https://ai.google.dev/gemini-api/docs)
 - [MoviePy Documentation](https://zulko.github.io/moviepy/)
-- [Render Documentation](https://render.com/docs)
 
 ## Contributing
 

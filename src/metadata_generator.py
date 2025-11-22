@@ -258,9 +258,8 @@ URL: {news_article.get('url', '')}
    - 重要なポイントを箇条書きで
    - {"ハッシュタグを含める" if include_hashtags else ""}
    - 視聴者にとっての価値を明確に
-   - **【重要】**: 説明文の最後に必ず「📰 参考記事」セクションを含めること
-   - 参考記事セクションには、メイン記事と全ての関連記事のタイトル、出典、URLを必ず記載すること
-   - 複数の情報源を参照した場合は、それを明示して信頼性をアピールすること
+   - **【注意】**: 免責事項と参考記事セクションは自動で追加されるため、説明文には含めないでください
+   - 説明文は動画の内容説明のみに集中してください
    - 説明文は1つのセクションとして完結させ、途中で##見出しを使わないこと
 
 4. タグ:
@@ -280,9 +279,8 @@ URL: {news_article.get('url', '')}
 [サブテキスト（8-15文字、小さい文字で表示される）]
 
 ## 説明文
-[YouTube動画説明文の本文]
-
-{reference_section_example.strip()}
+[YouTube動画説明文の本文のみ]
+※免責事項と参考記事セクションは自動で追加されます
 
 ## タグ
 [タグ1, タグ2, タグ3, ...]
@@ -292,9 +290,7 @@ URL: {news_article.get('url', '')}
 - メインテキストは最もインパクトのある5-8文字
 - サブテキストは補足情報の8-15文字
 - メインとサブで情報が重複しないようにしてください
-- 説明文セクション内に参考記事情報を必ず含めてください
-- 参考記事は「📰 参考記事」という見出しで記載してください
-- 説明文セクションが終わるまで、他の##見出しを使わないでください
+- 説明文には動画の内容説明のみを記載してください（免責事項と参考記事は自動追加されます）
 """
 
         return prompt
@@ -366,6 +362,11 @@ URL: {news_article.get('url', '')}
             # 参考記事セクションより前の部分を保持
             base_description = description[:ref_start_idx].strip()
 
+        # 注意文を追加
+        disclaimer = "\n\n⚠️ 免責事項\n"
+        disclaimer += "本動画は情報提供のみを目的としており、特定の銘柄や投資行動を推奨するものではありません。投資に関する判断はご自身の責任でお願いします。\n"
+        disclaimer += "また、本動画で扱う情報は信頼できるデータに基づいていますが、その正確性および完全性を保証するものではありません。\n"
+
         # 参考記事セクションを再構築
         ref_section = "\n\n📰 参考記事\n\n"
 
@@ -386,8 +387,8 @@ URL: {news_article.get('url', '')}
 
             logger.info(f"Included {len(related_articles)} related articles in metadata")
 
-        # 説明文と参考記事を結合
-        return base_description + ref_section
+        # 説明文、注意文、参考記事を結合
+        return base_description + disclaimer + ref_section
 
     def _parse_metadata_response(self, response_text: str, news_article: Dict = None, related_articles: List[Dict] = None) -> Dict:
         """

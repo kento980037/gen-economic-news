@@ -640,7 +640,7 @@ metadata:
   description:
     max_length: 5000
     include_hashtags: true
-    include_chapters: true
+    include_chapters: false
 
   # タグ設定
   tags:

@@ -49,8 +49,9 @@ class MetadataGenerator:
             メタデータ辞書
             {
                 "title": str,  # YouTube用タイトル
-                "description": str,  # 説明文
+                "description": str,  # 説明文（参考記事セクションを含む）
                 "tags": List[str],  # タグリスト
+                "references": Dict,  # 参考記事情報（main_article, related_articles）
                 "generated_at": str,  # 生成日時
             }
         """
@@ -256,9 +257,8 @@ URL: {news_article.get('url', '')}
    - 動画の内容を簡潔に説明
    - 重要なポイントを箇条書きで
    - {"ハッシュタグを含める" if include_hashtags else ""}
-   - {"チャプター情報を含める（タイムスタンプ付き）" if include_chapters else ""}
    - 視聴者にとっての価値を明確に
-   - **【最重要】**: 説明文の最後に必ず「📰 参考記事」セクションを含めること
+   - **【重要】**: 説明文の最後に必ず「📰 参考記事」セクションを含めること
    - 参考記事セクションには、メイン記事と全ての関連記事のタイトル、出典、URLを必ず記載すること
    - 複数の情報源を参照した場合は、それを明示して信頼性をアピールすること
    - 説明文は1つのセクションとして完結させ、途中で##見出しを使わないこと
@@ -338,7 +338,6 @@ URL: {news_article.get('url', '')}
 
         OpenAI APIがプレースホルダーURLを生成してしまう問題を修正するため、
         参考記事セクションを完全に再構築する
-        さらに、無効なURLを持つ記事は除外する
 
         Args:
             description: 元の説明文
@@ -471,12 +470,19 @@ URL: {news_article.get('url', '')}
         if news_article or related_articles:
             description = self._fix_reference_urls(description, news_article, related_articles)
 
+        # 参考記事情報を別フィールドに保存
+        references = {
+            "main_article": news_article if news_article else None,
+            "related_articles": related_articles if related_articles else []
+        }
+
         return {
             "title": title.strip(),
             "thumbnail_main": thumbnail_main.strip(),
             "thumbnail_sub": thumbnail_sub.strip(),
             "description": description.strip(),
             "tags": tags,
+            "references": references,
             "generated_at": datetime.now().isoformat(),
         }
 

@@ -49,7 +49,7 @@ class MetadataGenerator:
             メタデータ辞書
             {
                 "title": str,  # YouTube用タイトル
-                "description": str,  # 説明文（参考記事セクションを含む）
+                "description": str,  # 説明文（免責事項とハッシュタグを含む、記事リンクは含まない）
                 "tags": List[str],  # タグリスト
                 "references": Dict,  # 参考記事情報（main_article, related_articles）
                 "generated_at": str,  # 生成日時
@@ -256,9 +256,8 @@ URL: {news_article.get('url', '')}
 3. 説明文:
    - 動画の内容を簡潔に説明
    - 重要なポイントを箇条書きで
-   - {"ハッシュタグを含める" if include_hashtags else ""}
    - 視聴者にとっての価値を明確に
-   - **【注意】**: 免責事項と参考記事セクションは自動で追加されるため、説明文には含めないでください
+   - **【注意】**: 免責事項とキーワードタグは自動で追加されるため、説明文には含めないでください
    - 説明文は動画の内容説明のみに集中してください
    - 説明文は1つのセクションとして完結させ、途中で##見出しを使わないこと
 
@@ -280,7 +279,7 @@ URL: {news_article.get('url', '')}
 
 ## 説明文
 [YouTube動画説明文の本文のみ]
-※免責事項と参考記事セクションは自動で追加されます
+※免責事項とキーワードタグは自動で追加されます
 
 ## タグ
 [タグ1, タグ2, タグ3, ...]
@@ -290,7 +289,7 @@ URL: {news_article.get('url', '')}
 - メインテキストは最もインパクトのある5-8文字
 - サブテキストは補足情報の8-15文字
 - メインとサブで情報が重複しないようにしてください
-- 説明文には動画の内容説明のみを記載してください（免責事項と参考記事は自動追加されます）
+- 説明文には動画の内容説明のみを記載してください（免責事項とタグは自動追加されます）
 """
 
         return prompt
@@ -330,18 +329,15 @@ URL: {news_article.get('url', '')}
 
     def _fix_reference_urls(self, description: str, news_article: Dict = None, related_articles: List[Dict] = None) -> str:
         """
-        説明文内の参考記事セクションのURLを実際のURLで置き換え
-
-        OpenAI APIがプレースホルダーURLを生成してしまう問題を修正するため、
-        参考記事セクションを完全に再構築する
+        説明文から参考記事セクションを削除し、免責事項を追加
 
         Args:
             description: 元の説明文
-            news_article: メイン記事データ
-            related_articles: 関連記事データのリスト
+            news_article: メイン記事データ（未使用）
+            related_articles: 関連記事データのリスト（未使用）
 
         Returns:
-            修正された説明文
+            参考記事セクションを削除し、免責事項を追加した説明文
         """
         # 参考記事セクションを探す
         ref_section_markers = ["📰 参考記事", "参考記事", "## 参考記事"]
@@ -365,30 +361,10 @@ URL: {news_article.get('url', '')}
         # 注意文を追加
         disclaimer = "\n\n⚠️ 免責事項\n"
         disclaimer += "本動画は情報提供のみを目的としており、特定の銘柄や投資行動を推奨するものではありません。投資に関する判断はご自身の責任でお願いします。\n"
-        disclaimer += "また、本動画で扱う情報は信頼できるデータに基づいていますが、その正確性および完全性を保証するものではありません。\n"
+        disclaimer += "また、本動画で扱う情報は信頼できるデータに基づいていますが、その正確性および完全性を保証するものではありません。"
 
-        # 参考記事セクションを再構築
-        ref_section = "\n\n📰 参考記事\n\n"
-
-        # メイン記事の情報を追加
-        if news_article:
-            ref_section += "【メイン記事】\n"
-            ref_section += f"{news_article.get('title', '')}\n"
-            ref_section += f"出典: {news_article.get('source', '')}\n"
-            ref_section += f"{news_article.get('url', '')}\n"
-
-        # 関連記事の情報を追加
-        if related_articles and len(related_articles) > 0:
-            ref_section += "\n【関連記事】\n"
-            for i, article in enumerate(related_articles, 1):
-                ref_section += f"{i}. {article.get('title', '')}\n"
-                ref_section += f"   出典: {article.get('source', '')}\n"
-                ref_section += f"   {article.get('url', '')}\n\n"
-
-            logger.info(f"Included {len(related_articles)} related articles in metadata")
-
-        # 説明文、注意文、参考記事を結合
-        return base_description + disclaimer + ref_section
+        # 説明文と注意文を結合（参考記事セクションは含めない）
+        return base_description + disclaimer
 
     def _parse_metadata_response(self, response_text: str, news_article: Dict = None, related_articles: List[Dict] = None) -> Dict:
         """
@@ -467,9 +443,14 @@ URL: {news_article.get('url', '')}
             thumbnail_sub = title[8:20]
             logger.warning(f"Thumbnail sub text not found, using truncated title: {thumbnail_sub}")
 
-        # 説明文の参考記事セクションを実際のURLで置き換え
+        # 説明文から参考記事セクションを削除
         if news_article or related_articles:
             description = self._fix_reference_urls(description, news_article, related_articles)
+
+        # タグをハッシュタグとしてdescriptionに追加
+        if tags:
+            hashtags = " ".join([f"#{tag}" for tag in tags])
+            description = description.strip() + "\n\n" + hashtags
 
         # 参考記事情報を別フィールドに保存
         references = {

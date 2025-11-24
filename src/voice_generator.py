@@ -181,8 +181,29 @@ class VoiceGenerator:
             )
         )
 
+        # レスポンス構造の検証とエラーハンドリング
+        if not response or not hasattr(response, 'candidates'):
+            raise ValueError(f"Invalid response from Gemini API: no candidates found (text: '{text}')")
+
+        if not response.candidates:
+            raise ValueError(f"Empty candidates list from Gemini API (text: '{text}')")
+
+        candidate = response.candidates[0]
+        if not candidate or not hasattr(candidate, 'content') or candidate.content is None:
+            raise ValueError(f"Invalid candidate content from Gemini API (text: '{text}')")
+
+        if not hasattr(candidate.content, 'parts') or not candidate.content.parts:
+            raise ValueError(f"No parts in candidate content from Gemini API (text: '{text}')")
+
+        part = candidate.content.parts[0]
+        if not hasattr(part, 'inline_data') or not part.inline_data:
+            raise ValueError(f"No inline_data in part from Gemini API (text: '{text}')")
+
+        if not hasattr(part.inline_data, 'data') or not part.inline_data.data:
+            raise ValueError(f"No audio data in inline_data from Gemini API (text: '{text}')")
+
         # 音声データを取得
-        audio_data = response.candidates[0].content.parts[0].inline_data.data
+        audio_data = part.inline_data.data
 
         # WAVファイルとして保存（PCM audio: 24kHz, mono, 16-bit）
         self._save_wav_file(audio_data, output_path, sample_rate=24000, channels=1, sample_width=2)
@@ -449,6 +470,11 @@ class VoiceGenerator:
             if not block:
                 continue
 
+            # 区切り線や記号のみの行をスキップ
+            if re.match(r'^[-=*_]+$', block):
+                logger.info(f"Skipping separator line: '{block}'")
+                continue
+
             # ブロック内の行を処理
             lines = block.split("\n")
             block_text = []
@@ -457,6 +483,11 @@ class VoiceGenerator:
             for line in lines:
                 line = line.strip()
                 if not line:
+                    continue
+
+                # 区切り線や記号のみの行をスキップ
+                if re.match(r'^[-=*_]+$', line):
+                    logger.info(f"Skipping separator line: '{line}'")
                     continue
 
                 # 発言者の識別（A: またはB: で始まる行）
@@ -487,7 +518,46 @@ class VoiceGenerator:
 
         logger.info(f"Parsed dialogue script: {len(segments)} segments (A: {sum(1 for s in segments if s['speaker'] == 'A')}, B: {sum(1 for s in segments if s['speaker'] == 'B')})")
 
-        return segments
+        # 短すぎるセグメントを処理（Gemini TTSは短いテキストを処理できないため）
+        MIN_TEXT_LENGTH = 5
+        merged_segments = []
+        skip_next = False
+
+        for i, segment in enumerate(segments):
+            if skip_next:
+                skip_next = False
+                continue
+
+            text = segment["text"]
+            speaker = segment["speaker"]
+
+            # 短すぎるセグメントをチェック
+            if len(text) < MIN_TEXT_LENGTH:
+                # 前のセグメントと結合を試みる（同じ発言者の場合）
+                if merged_segments and merged_segments[-1]["speaker"] == speaker:
+                    logger.info(f"Merging short segment ({len(text)} chars) with previous: '{text}'")
+                    merged_segments[-1]["text"] += " " + text
+                    continue
+                # 次のセグメントと結合を試みる（同じ発言者の場合）
+                elif i + 1 < len(segments) and segments[i + 1]["speaker"] == speaker:
+                    logger.info(f"Merging short segment ({len(text)} chars) with next: '{text}'")
+                    merged_text = text + " " + segments[i + 1]["text"]
+                    merged_segments.append({
+                        "speaker": speaker,
+                        "text": merged_text
+                    })
+                    skip_next = True
+                    continue
+                else:
+                    # 結合できない場合は、警告を出してそのまま追加（スキップしてもよいが、一応残す）
+                    logger.warning(f"Cannot merge very short segment ({len(text)} chars), keeping as-is: '{text}'")
+
+            merged_segments.append(segment)
+
+        if len(merged_segments) < len(segments):
+            logger.info(f"Merged short segments: {len(segments)} → {len(merged_segments)} segments")
+
+        return merged_segments
 
     def _merge_audio_files(self, audio_files: List[str], output_path: str):
         """

@@ -1053,6 +1053,10 @@ interest rate policy
             return 5.0
 
         try:
+            # 現在日時を取得
+            now = datetime.now(pytz.UTC)
+            current_date = now.strftime('%Y年%m月%d日 %H:%M UTC')
+
             prompt = f"""
 以下の金融ニュース記事の「話題性」を0から10のスコアで評価してください。
 
@@ -1062,11 +1066,20 @@ interest rate policy
 - 緊急性・速報性
 - 金融市場での重要性
 - グローバルな影響
+- 記事の内容から判断した「実際の新しさ」（記事の内容から本当に最新の情報かを判断してください）
+
+【現在日時】
+{current_date}
 
 【記事情報】
 タイトル: {article.title}
 要約: {article.summary[:300]}
 ソース: {article.source}
+
+【重要】
+- 記事の内容から、本当に最新の情報かどうかを判断してください
+- 内容が古い情報であれば、スコアを下げてください
+- 内容が最新の動向や最近の出来事を扱っていれば、スコアを上げてください
 
 数字のみを返してください（例: 7.5）
 """
@@ -1074,7 +1087,7 @@ interest rate policy
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "あなたは金融市場の専門家です。記事の話題性を客観的に評価してください。"},
+                    {"role": "system", "content": "あなたは金融市場の専門家です。記事の話題性を客観的に評価してください。記事の内容から実際の新しさも判断してください。"},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=10,
@@ -1092,7 +1105,7 @@ interest rate policy
 
     def select_article_by_trending_score(self, articles: List[NewsArticle]) -> NewsArticle:
         """
-        話題性スコアで記事を選択（上位30%から注目度加重ランダム選択）
+        話題性スコア（新しさを含む）で記事を選択（上位30%から加重ランダム選択）
 
         Args:
             articles: 記事リスト

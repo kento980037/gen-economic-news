@@ -459,62 +459,51 @@ class VoiceGenerator:
         import re
 
         segments = []
+        current_speaker = None
+        current_text = []
 
-        # 空行で区切ってブロックに分割
-        blocks = script_text.split("\n\n")
+        # 全ての行を処理
+        lines = script_text.split("\n")
 
-        last_speaker = None  # 最後に使用した発言者を記録
+        for line in lines:
+            line = line.strip()
 
-        for block in blocks:
-            block = block.strip()
-            if not block:
+            # 空行や区切り線をスキップ
+            if not line or re.match(r'^[-=*_]+$', line):
                 continue
 
-            # 区切り線や記号のみの行をスキップ
-            if re.match(r'^[-=*_]+$', block):
-                logger.info(f"Skipping separator line: '{block}'")
-                continue
+            # 発言者の識別（A: またはB: で始まる行）
+            speaker_match = re.match(r'^([AB])[:：]\s*(.*)$', line)
 
-            # ブロック内の行を処理
-            lines = block.split("\n")
-            block_text = []
-            speaker = None
+            if speaker_match:
+                # 新しい発言者が見つかった場合、前のセグメントを保存
+                if current_speaker and current_text:
+                    segments.append({
+                        "speaker": current_speaker,
+                        "text": " ".join(current_text).strip()
+                    })
+                    current_text = []
 
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-
-                # 区切り線や記号のみの行をスキップ
-                if re.match(r'^[-=*_]+$', line):
-                    logger.info(f"Skipping separator line: '{line}'")
-                    continue
-
-                # 発言者の識別（A: またはB: で始まる行）
-                speaker_match = re.match(r'^([AB])[:：]\s*(.*)$', line)
-
-                if speaker_match:
-                    speaker = speaker_match.group(1)
-                    text = speaker_match.group(2)
-                    if text:
-                        block_text.append(text)
+                # 新しい発言者と発言内容を設定
+                current_speaker = speaker_match.group(1)
+                text = speaker_match.group(2).strip()
+                if text:
+                    current_text.append(text)
+            else:
+                # 発言者ラベルがない行は、現在の発言の続きとして追加
+                if current_speaker:
+                    current_text.append(line)
                 else:
-                    block_text.append(line)
+                    # 最初の行が発言者ラベルなしの場合は、Aとして扱う
+                    current_speaker = "A"
+                    current_text.append(line)
 
-            # ブロックに発言者指定がない場合、AとBを交互に割り当て
-            if not speaker:
-                if last_speaker == "A":
-                    speaker = "B"
-                else:
-                    speaker = "A"
-
-            # セグメントを追加
-            if block_text:
-                segments.append({
-                    "speaker": speaker,
-                    "text": " ".join(block_text).strip()
-                })
-                last_speaker = speaker
+        # 最後のセグメントを追加
+        if current_speaker and current_text:
+            segments.append({
+                "speaker": current_speaker,
+                "text": " ".join(current_text).strip()
+            })
 
         logger.info(f"Parsed dialogue script: {len(segments)} segments (A: {sum(1 for s in segments if s['speaker'] == 'A')}, B: {sum(1 for s in segments if s['speaker'] == 'B')})")
 

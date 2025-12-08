@@ -370,10 +370,10 @@ B: まあ、簡単に言うと〜ってことですね
             # 台本を解析
             result = self._parse_script_response(script_text, news_article)
 
-            # dialogueスタイルの場合、ラベルなし行を修正
-            if self.style == "dialogue":
-                result['script'] = self._fix_missing_speaker_labels(result['script'])
-                logger.info("Applied speaker label correction for dialogue script")
+            # ラベルなし行を修正（無条件で適用）
+            logger.info("Applying speaker label correction...")
+            result['script'] = self._fix_missing_speaker_labels(result['script'])
+            logger.info("Speaker label correction applied")
 
             script_length = len(result['script'])
             logger.info(f"✓ Chill script generated. Length: {script_length} chars (target: {target_chars})")
@@ -629,11 +629,18 @@ B: まあ、簡単に言うと〜ってことですね
         # toneに応じて適切なメソッドを呼び出す
         if self.tone == "chill":
             # ゆるチル系の場合は専用メソッドを使用
-            return self.generate_script_chill(
+            result = self.generate_script_chill(
                 news_article=news_article,
                 target_duration=target_duration if target_duration != 1080 else 720,  # デフォルトを12分に
                 additional_context=additional_context
             )
+
+            # 念のため再度ラベル修正を適用（無条件）
+            logger.info("Applying speaker label correction (final check)...")
+            result['script'] = self._fix_missing_speaker_labels(result['script'])
+            logger.info("Speaker label correction applied (final check)")
+
+            return result
 
         # 文字数を時間から計算（日本語: 1秒あたり約5-6文字、余裕を持って5文字）
         target_chars = target_duration * 5
@@ -1362,10 +1369,19 @@ B: まあ、簡単に言うと〜ってことですね
         """
         import re
 
+        logger.info("=" * 60)
+        logger.info("STARTING SPEAKER LABEL CORRECTION")
+        logger.info(f"Input script length: {len(script)} chars")
+        logger.info("=" * 60)
+
         lines = script.split("\n")
+        logger.info(f"Total lines in script: {len(lines)}")
 
         # ステップ1: すべてのラベルを削除して、発言のみを抽出
         utterances = []
+        lines_with_label = 0
+        lines_without_label = 0
+
         for line in lines:
             line_stripped = line.strip()
 
@@ -1377,19 +1393,29 @@ B: まあ、簡単に言うと〜ってことですね
             speaker_match = re.match(r'^([AB])[:：]\s*(.+)$', line_stripped)
             if speaker_match:
                 # 既にラベルがある場合は、ラベルを削除
+                lines_with_label += 1
                 text = speaker_match.group(2).strip()
                 if text and len(text) >= 3:
                     utterances.append(text)
+                    logger.debug(f"Extracted (had label): {text[:50]}...")
             else:
                 # ラベルがない場合はそのまま
                 if len(line_stripped) >= 3:
+                    lines_without_label += 1
                     utterances.append(line_stripped)
+                    logger.debug(f"Extracted (no label): {line_stripped[:50]}...")
+
+        logger.info(f"Lines with label: {lines_with_label}")
+        logger.info(f"Lines without label: {lines_without_label}")
+        logger.info(f"Total utterances extracted: {len(utterances)}")
 
         # ステップ2: AとBを交互に割り当て
         fixed_lines = []
         for i, text in enumerate(utterances):
             speaker = "A" if i % 2 == 0 else "B"
             fixed_lines.append(f"{speaker}: {text}")
+            if i < 5:  # 最初の5行をログ出力
+                logger.info(f"Line {i+1}: {speaker}: {text[:50]}...")
 
         logger.info(f"Reconstructed dialogue with {len(utterances)} utterances (alternating A/B pattern)")
 
@@ -1406,8 +1432,16 @@ B: まあ、簡単に言うと〜ってことですね
 
         if consecutive_count > 0:
             logger.warning(f"Found {consecutive_count} consecutive same-speaker lines (this should not happen)")
+        else:
+            logger.info("✓ All lines have alternating speakers (A/B pattern verified)")
 
-        return "\n".join(fixed_lines)
+        result = "\n".join(fixed_lines)
+        logger.info(f"Output script length: {len(result)} chars")
+        logger.info("=" * 60)
+        logger.info("SPEAKER LABEL CORRECTION COMPLETED")
+        logger.info("=" * 60)
+
+        return result
 
     def refine_script(self, script_data: Dict, feedback: str) -> Dict:
         """

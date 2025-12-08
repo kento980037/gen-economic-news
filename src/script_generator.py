@@ -370,6 +370,11 @@ B: まあ、簡単に言うと〜ってことですね
             # 台本を解析
             result = self._parse_script_response(script_text, news_article)
 
+            # dialogueスタイルの場合、ラベルなし行を修正
+            if self.style == "dialogue":
+                result['script'] = self._fix_missing_speaker_labels(result['script'])
+                logger.info("Applied speaker label correction for dialogue script")
+
             script_length = len(result['script'])
             logger.info(f"✓ Chill script generated. Length: {script_length} chars (target: {target_chars})")
 
@@ -1341,6 +1346,68 @@ B: まあ、簡単に言うと〜ってことですね
             "estimated_duration": estimated_duration,
             "generated_at": datetime.now().isoformat(),
         }
+
+    def _fix_missing_speaker_labels(self, script: str) -> str:
+        """
+        すべてのラベルを削除して、発言行にAとBを交互に割り当て直す
+
+        このアプローチにより、AIが途中から間違ったラベルを付けた場合でも
+        確実に正しい交互パターンを保証できます。
+
+        Args:
+            script: 台本テキスト
+
+        Returns:
+            修正された台本テキスト
+        """
+        import re
+
+        lines = script.split("\n")
+
+        # ステップ1: すべてのラベルを削除して、発言のみを抽出
+        utterances = []
+        for line in lines:
+            line_stripped = line.strip()
+
+            # 空行や区切り線はスキップ
+            if not line_stripped or re.match(r'^[-=*_]+$', line_stripped):
+                continue
+
+            # ラベルを削除して発言のみを抽出
+            speaker_match = re.match(r'^([AB])[:：]\s*(.+)$', line_stripped)
+            if speaker_match:
+                # 既にラベルがある場合は、ラベルを削除
+                text = speaker_match.group(2).strip()
+                if text and len(text) >= 3:
+                    utterances.append(text)
+            else:
+                # ラベルがない場合はそのまま
+                if len(line_stripped) >= 3:
+                    utterances.append(line_stripped)
+
+        # ステップ2: AとBを交互に割り当て
+        fixed_lines = []
+        for i, text in enumerate(utterances):
+            speaker = "A" if i % 2 == 0 else "B"
+            fixed_lines.append(f"{speaker}: {text}")
+
+        logger.info(f"Reconstructed dialogue with {len(utterances)} utterances (alternating A/B pattern)")
+
+        # 連続する同じ発言者をチェック（デバッグ用）
+        prev_speaker = None
+        consecutive_count = 0
+        for line in fixed_lines:
+            match = re.match(r'^([AB])[:：]', line)
+            if match:
+                speaker = match.group(1)
+                if speaker == prev_speaker:
+                    consecutive_count += 1
+                prev_speaker = speaker
+
+        if consecutive_count > 0:
+            logger.warning(f"Found {consecutive_count} consecutive same-speaker lines (this should not happen)")
+
+        return "\n".join(fixed_lines)
 
     def refine_script(self, script_data: Dict, feedback: str) -> Dict:
         """

@@ -51,6 +51,10 @@ class ScriptGenerator:
         self.system_prompt_speaker_a = config.get("system_prompt_speaker_a", "")
         self.system_prompt_speaker_b = config.get("system_prompt_speaker_b", "")
 
+        # フォーマット指示（config.yamlから読み込み）
+        self.dialogue_format_instruction = config.get("dialogue_format_instruction", "")
+        self.narration_format_instruction = config.get("narration_format_instruction", "")
+
     def generate_script_by_sections(
         self,
         news_article: Dict,
@@ -293,30 +297,23 @@ class ScriptGenerator:
         if additional_context:
             article_info += f"\n【関連記事】\n{additional_context}\n"
 
-        # ゆるチル系専用プロンプト（dialogueかnarrationで出力形式が変わる）
+        # フォーマット指示をconfig.yamlから取得（設定の一元管理）
         if self.style == "dialogue":
-            script_format = """【超重要】会話形式で、**すべての発言に必ず「A:」または「B:」を明記してください**。
-
-**絶対に守ること：**
-- すべての発言は「A:」または「B:」で始める（例外なし）
-- 発言者ラベルのない行は絶対に書かない
-- 各発言は改行で区切る
-
-**正しい形式の例：**
-A: はい、今夜もやってきましたー
-B: どうもー。今日も一杯やりながらですね
-A: 今日のニュース、なんかすごいことになってますよ
-B: まあ、簡単に言うと〜ってことですね
-
-**間違った形式（絶対NG）：**
-はい、今夜もやってきましたー（発言者ラベルがない）
-どうもー。今日も一杯やりながらですね（発言者ラベルがない）"""
+            script_format = self.dialogue_format_instruction
         else:
-            script_format = "[純粋なナレーション原稿のみ。セクション名は書かない。]"
+            script_format = self.narration_format_instruction
 
         user_prompt = f"""{article_info}
 
 上記のニュース記事をもとに、夜にお酒を飲みながら聞ける"ゆるくてチルい"雰囲気のYouTubeポッドキャスト用の台本を作ってください。
+
+{"=" * 60}
+🚨 【最重要】出力フォーマット要件（必ず守ること） 🚨
+{"=" * 60}
+{"**すべての発言は「A:」または「B:」で始めてください**" if self.style == "dialogue" else ""}
+{"**ラベルのない行は1行も書かないでください**" if self.style == "dialogue" else ""}
+{"**発言は短く（1-3文）、AとBが交互に話してください**" if self.style == "dialogue" else ""}
+{"=" * 60}
 
 **⚠️ 最重要要件: 必ず{target_chars}文字以上の台本を作成してください ⚠️**
 
@@ -325,7 +322,6 @@ B: まあ、簡単に言うと〜ってことですね
 - トーン: 深夜ラジオ風、友達と話すような自然な口調
 - 構成: システムプロンプトに従った7セクション構成
 - スタイル: {"2人の掛け合い（ボケ＆ツッコミ）" if self.style == "dialogue" else "単独ナレーション"}
-{"- **【超重要】すべての発言に必ず「A:」または「B:」のラベルを付ける（例外なし）**" if self.style == "dialogue" else ""}
 
 **お願い**
 - 記事本文の文章はそのまま読まず、要点を再構成して語り口調に
@@ -333,10 +329,9 @@ B: まあ、簡単に言うと〜ってことですね
 - 硬い専門用語には軽く一言説明を入れる
 - AIっぽさを消して"話してる感じ"で書く
 - 具体的な企業名・数字・日付は正確に（記事に基づく）
-- **会話を増やす**: やりとりを多くして、十分な長さを確保
-- **深掘りする**: 一つのトピックについて、複数の角度から話す
-- **具体例を複数**: 過去事例、他社比較、市場反応など
-{"- **発言者ラベル（A:、B:）のない行は絶対に書かない**" if self.style == "dialogue" else ""}
+{"- **会話を増やす**: やりとりを多くして、十分な長さを確保" if self.style == "dialogue" else ""}
+{"- **深掘りする**: 一つのトピックについて、複数の角度から話す" if self.style == "dialogue" else ""}
+{"- **具体例を複数**: 過去事例、他社比較、市場反応など" if self.style == "dialogue" else ""}
 
 【出力形式】
 以下の形式で出力してください:
@@ -349,6 +344,15 @@ B: まあ、簡単に言うと〜ってことですね
 
 ## キーワード
 [カンマ区切りで5-10個]
+
+{"=" * 60}
+🚨 最終チェック（出力前に必ず確認）🚨
+{"=" * 60}
+{"□ すべての行が「A:」または「B:」で始まっているか？" if self.style == "dialogue" else ""}
+{"□ ラベルのない行は1行もないか？" if self.style == "dialogue" else ""}
+{"□ 発言は短く、交互になっているか？" if self.style == "dialogue" else ""}
+□ 台本の長さは{target_chars}文字以上か？
+{"=" * 60}
 """
 
         try:
@@ -370,10 +374,26 @@ B: まあ、簡単に言うと〜ってことですね
             # 台本を解析
             result = self._parse_script_response(script_text, news_article)
 
-            # ラベルなし行を修正（無条件で適用）
-            logger.info("Applying speaker label correction...")
-            result['script'] = self._fix_missing_speaker_labels(result['script'])
-            logger.info("Speaker label correction applied")
+            # dialogue形式の場合、ラベルチェックを実行
+            if self.style == "dialogue":
+                logger.info("Checking speaker labels in generated script...")
+                label_check = self._check_speaker_labels(result['script'])
+
+                if label_check['has_unlabeled_lines']:
+                    logger.warning(f"⚠️ Found {label_check['unlabeled_count']} lines without speaker labels!")
+                    logger.warning(f"Labeled lines: {label_check['labeled_count']}, Unlabeled lines: {label_check['unlabeled_count']}")
+                    logger.info("Applying speaker label correction...")
+                    result['script'] = self._fix_missing_speaker_labels(result['script'])
+                    logger.info("Speaker label correction applied")
+
+                    # 修正後に再チェック
+                    label_check_after = self._check_speaker_labels(result['script'])
+                    if label_check_after['has_unlabeled_lines']:
+                        logger.error(f"❌ Still found {label_check_after['unlabeled_count']} unlabeled lines after correction!")
+                    else:
+                        logger.info("✓ All lines now have speaker labels")
+                else:
+                    logger.info(f"✓ All {label_check['labeled_count']} lines have speaker labels")
 
             script_length = len(result['script'])
             logger.info(f"✓ Chill script generated. Length: {script_length} chars (target: {target_chars})")
@@ -635,10 +655,23 @@ B: まあ、簡単に言うと〜ってことですね
                 additional_context=additional_context
             )
 
-            # 念のため再度ラベル修正を適用（無条件）
-            logger.info("Applying speaker label correction (final check)...")
-            result['script'] = self._fix_missing_speaker_labels(result['script'])
-            logger.info("Speaker label correction applied (final check)")
+            # dialogue形式の場合、最終チェックとラベル修正を適用
+            if self.style == "dialogue":
+                logger.info("Applying speaker label correction (final check)...")
+                label_check = self._check_speaker_labels(result['script'])
+
+                if label_check['has_unlabeled_lines']:
+                    logger.warning(f"⚠️ Final check: Found {label_check['unlabeled_count']} lines without speaker labels!")
+                    result['script'] = self._fix_missing_speaker_labels(result['script'])
+
+                    # 修正後に再チェック
+                    label_check_after = self._check_speaker_labels(result['script'])
+                    if label_check_after['has_unlabeled_lines']:
+                        logger.error(f"❌ Still found {label_check_after['unlabeled_count']} unlabeled lines after final correction!")
+                    else:
+                        logger.info("✓ All lines now have speaker labels (after final correction)")
+                else:
+                    logger.info(f"✓ All {label_check['labeled_count']} lines have speaker labels (final check passed)")
 
             return result
 
@@ -1352,6 +1385,47 @@ B: まあ、簡単に言うと〜ってことですね
             "keywords": keywords,
             "estimated_duration": estimated_duration,
             "generated_at": datetime.now().isoformat(),
+        }
+
+    def _check_speaker_labels(self, script: str) -> Dict:
+        """
+        スクリプト内の話者ラベルをチェック
+
+        Args:
+            script: チェックするスクリプト
+
+        Returns:
+            チェック結果の辞書
+            {
+                'labeled_count': int,  # ラベル付き行数
+                'unlabeled_count': int,  # ラベルなし行数
+                'has_unlabeled_lines': bool,  # ラベルなし行が存在するか
+            }
+        """
+        import re
+
+        lines = script.split("\n")
+        labeled_count = 0
+        unlabeled_count = 0
+
+        for line in lines:
+            line_stripped = line.strip()
+
+            # 空行や区切り線はスキップ
+            if not line_stripped or re.match(r'^[-=*_]+$', line_stripped):
+                continue
+
+            # ラベルがあるかチェック
+            if re.match(r'^[AB][:：]\s*', line_stripped):
+                labeled_count += 1
+            else:
+                unlabeled_count += 1
+                logger.debug(f"Unlabeled line found: {line_stripped[:50]}...")
+
+        return {
+            'labeled_count': labeled_count,
+            'unlabeled_count': unlabeled_count,
+            'has_unlabeled_lines': unlabeled_count > 0,
         }
 
     def _fix_missing_speaker_labels(self, script: str) -> str:
